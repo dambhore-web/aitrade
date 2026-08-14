@@ -11,17 +11,40 @@ Usage, from inside a module that needs e.g. announcement_listener_v2.py:
 """
 import sys
 
+from dotenv import load_dotenv
+
 from app.core.config import get_settings
 
-_added = False
+_path_added = False
+_env_loaded = False
 
 
 def add_legacy_root_to_path() -> None:
-    global _added
-    if _added:
+    global _path_added
+    if _path_added:
         return
     settings = get_settings()
     root = str(settings.legacy_root)
     if root not in sys.path:
         sys.path.insert(0, root)
-    _added = True
+    _path_added = True
+
+
+def load_legacy_env() -> None:
+    """Load Trading_bot/.env into this process's environment (without
+    overriding anything already set, e.g. by aitrade's own backend/.env).
+
+    Legacy scripts like announcement_listener_v2.py call load_dotenv() on
+    import too, but that searches upward from the current working directory
+    -- which won't find Trading_bot/.env when uvicorn runs from a sibling
+    directory (aitrade/backend). Loading it explicitly here, before
+    importing any legacy module that needs it, makes their own load_dotenv()
+    call a harmless no-op instead of leaving required vars (e.g.
+    TRUEDATA_AUTH_TOKEN) unset.
+    """
+    global _env_loaded
+    if _env_loaded:
+        return
+    settings = get_settings()
+    load_dotenv(dotenv_path=settings.legacy_root / ".env", override=False)
+    _env_loaded = True

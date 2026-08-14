@@ -30,6 +30,7 @@ kite_instances.pkl
 *.sqlite
 *.sqlite3
 *.log
+/data/
 
 # --- OS / editor ---
 .DS_Store

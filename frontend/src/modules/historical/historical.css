@@ -1,0 +1,118 @@
+.login-flow {
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  max-width: 560px;
+}
+.login-flow ol {
+  padding-left: 1.2rem;
+  line-height: 1.9;
+}
+.login-flow input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  margin-right: 0.5rem;
+  min-width: 220px;
+}
+.login-flow button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid #12121c;
+  background: #ffe600;
+  cursor: pointer;
+  font-weight: 600;
+}
+.login-flow button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.job-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+  max-width: 900px;
+}
+.job-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #444;
+}
+.job-form select,
+.job-form input[type="date"],
+.job-form textarea {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.job-form .symbols-field {
+  grid-column: 1 / -1;
+}
+.field-hint {
+  font-size: 0.78rem;
+  color: #888;
+  margin: 0.2rem 0 0;
+}
+.job-form .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.job-form button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0.55rem 1.2rem;
+  border-radius: 6px;
+  border: 1px solid #12121c;
+  background: #ffe600;
+  font-weight: 600;
+  cursor: pointer;
+}
+.job-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.job-progress table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.job-progress th,
+.job-progress td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+.job-progress th {
+  background: #12121c;
+  color: #fff;
+}
+.status-success {
+  color: #1a7f37;
+}
+.status-failed {
+  color: #b3261e;
+}
+.status-running {
+  color: #8a6d00;
+}
+
+.download-link {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  background: #12121c;
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.9rem;
+}

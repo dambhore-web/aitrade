@@ -351,3 +351,42 @@ only way to get a trustworthy "what do I currently hold, and why" view.
 - **Backtest engine integration:** `backtest.py`'s exact integration point
   (Module C only, or also exposed via Module D for research) not yet decided
   — revisit when Phase 2/1 implementation starts.
+
+**Decisions made while building Phase 1 (Module A + Module D):**
+
+- **`financial_result_checker.py` does not produce sentiment.** Its docstring
+  claims "positive"/"negative" sentiment, but `find_news_result()` actually
+  returns `"result"` or `"general"` — it classifies whether text *is* a
+  financial-result announcement, not its polarity. Module A's enrichment
+  therefore populates `financial_result_flag` (1/0), not `sentiment_label`/
+  `sentiment_score` — those two columns exist in the schema per the original
+  data contract but stay unpopulated until a real sentiment model is wired in.
+- **`bonus_buyback_extract.py` and the scraping portions of
+  `nse_bse_extraction_tool.py` were not wrapped in this first pass** of
+  Module A — both are large (39KB/69KB) and not required to get the core
+  listener→feed→React pipeline working end to end. `category` and
+  `is_bonus_buyback` stay unpopulated for now; wiring those in is follow-up
+  work on Module A, not a new module.
+- **Module D's job registry is in-memory only** (a plain dict in the backend
+  process) — jobs don't survive a backend restart. Acceptable for a
+  single-user local tool where a job is a one-off download; revisit with a
+  persisted store only if that becomes a real annoyance.
+- **`KITE_API_KEY`/`KITE_API_SECRET` were copied into `aitrade/backend/.env`
+  directly**, rather than the backend reaching into
+  `Trading_bot/_archive/other_bot_projects/new_trade_tool/.env` where they
+  also live — that path has already moved once (per that project's own
+  `config.py` comment) and Module D shouldn't depend on it staying put.
+  `TRUEDATA_AUTH_TOKEN`/`OPENAI_API_KEY` were *not* copied and stay
+  single-sourced in `Trading_bot/.env`, loaded at runtime via
+  `app.core.legacy_path.load_legacy_env()` — refreshing the TrueData token
+  (it expires every few hours) only ever has to happen in one file.
+- **Downloaded historical CSVs land in `aitrade/data/historical/`**, not
+  `Trading_bot/dev/zerodha_history/` — keeps aitrade's own output
+  self-contained rather than writing into the legacy tree.
+- **The announcement listener runs as a background thread, not an asyncio
+  task**, reusing `announcement_listener_v2.py`'s own lock-file guard
+  (`Trading_bot/listener.lock`) so it refuses to run two instances at once.
+  Known quirk inherited from the legacy script: if the backend is killed
+  ungracefully (or restarted via `uvicorn --reload` mid-cycle), the lock file
+  can be left stale and needs manual deletion before the listener will start
+  again — same limitation the standalone script already had.

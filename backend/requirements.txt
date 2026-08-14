@@ -3,3 +3,13 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
 python-dotenv==1.0.1
+
+# Module D (Historical Extractor) -- matches Trading_bot/requirements.txt pin
+kiteconnect==5.0.1
+pandas>=2.2
+
+# Module A (Announcements) -- needed to import the legacy modules being wrapped
+requests>=2.31
+onnxruntime>=1.19
+transformers>=4.44
+openai>=1.40

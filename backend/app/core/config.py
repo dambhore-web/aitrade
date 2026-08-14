@@ -27,6 +27,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    # Official Kite Connect app credentials (Module D: Historical Extractor).
+    kite_api_key: str = ""
+    kite_api_secret: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
