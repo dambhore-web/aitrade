@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL, apiGet } from "../../shared/api";
+import TradePanel from "../announcement_trading/TradePanel";
+import TradingSettingsPanel from "../announcement_trading/TradingSettingsPanel";
 import type { AnnouncementOut, AnnouncementsPageResponse, ListenerStatus } from "./types";
 import "./announcements.css";
 
@@ -11,6 +13,7 @@ export default function AnnouncementsPage() {
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [liveItems, setLiveItems] = useState<AnnouncementOut[]>([]);
+  const [tradeTarget, setTradeTarget] = useState<AnnouncementOut | null>(null);
 
   const query = useQuery({
     queryKey: ["announcements", exchange, search, offset],
@@ -57,6 +60,8 @@ export default function AnnouncementsPage() {
   return (
     <div className="page">
       <h1>Corporate Announcements</h1>
+
+      <TradingSettingsPanel />
 
       {status.data?.auth_expired && (
         <div className="banner banner-error">
@@ -110,6 +115,7 @@ export default function AnnouncementsPage() {
               <th>Title</th>
               <th>Result?</th>
               <th>PDF</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -133,6 +139,11 @@ export default function AnnouncementsPage() {
                     "-"
                   )}
                 </td>
+                <td>
+                  <button className="trade-link-button" onClick={() => setTradeTarget(a)}>
+                    Trade
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -153,6 +164,8 @@ export default function AnnouncementsPage() {
           Older
         </button>
       </div>
+
+      {tradeTarget && <TradePanel announcement={tradeTarget} onClose={() => setTradeTarget(null)} />}
     </div>
   );
 }

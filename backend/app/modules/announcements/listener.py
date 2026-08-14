@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import psutil
 import requests
 
 from app.core.legacy_path import add_legacy_root_to_path, load_legacy_env
@@ -49,6 +50,25 @@ def start_background_thread() -> None:
     thread.start()
 
 
+def _clear_stale_lock(legacy) -> None:
+    """announcement_listener_v2.py's own lock file records only a PID, with
+    no liveness check -- fine for its original single-process CLI use, but
+    under `uvicorn --reload` an old worker can be torn down before this
+    thread's `finally: legacy.release_lock()` runs, leaving a stale lock
+    every reload. Clear it here (only when the recorded PID is confirmed
+    dead) rather than requiring a manual delete each time."""
+    lock_path = legacy.LOCK_PATH
+    if not lock_path.exists():
+        return
+    try:
+        pid = int(lock_path.read_text().strip())
+    except (ValueError, OSError):
+        return
+    if not psutil.pid_exists(pid):
+        logger.info("Clearing stale listener.lock (dead PID %s)", pid)
+        lock_path.unlink(missing_ok=True)
+
+
 def _run() -> None:
     load_legacy_env()
     add_legacy_root_to_path()
@@ -66,6 +86,7 @@ def _run() -> None:
         _set_state(running=False, last_error=f"{type(e).__name__}: {e}")
         return
 
+    _clear_stale_lock(legacy)
     try:
         legacy.acquire_lock()
     except SystemExit:

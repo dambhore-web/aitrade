@@ -1,0 +1,128 @@
+"""
+Module B's own database -- aitrade/data/announcement_trading.db. Deliberately
+NOT reusing any of Kite_API_31.py's pickle files (global.pickle,
+inputs/global.pickle) for settings storage: a real SQLite table is
+inspectable/backupable in a way a PySimpleGUI pickle blob isn't, and this
+keeps Module B fully self-contained under aitrade/.
+
+Settings are stored as a single row (id=1) rather than a key/value table --
+there is exactly one active configuration, matching the legacy GUI's own
+single global settings model.
+"""
+import json
+import sqlite3
+from pathlib import Path
+from typing import Optional
+
+DB_PATH = Path(__file__).resolve().parents[4] / "data" / "announcement_trading.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+CREATE_SETTINGS = """
+CREATE TABLE IF NOT EXISTS settings(
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  variety TEXT NOT NULL DEFAULT 'regular',
+  order_type TEXT NOT NULL DEFAULT 'MARKET',
+  product_type TEXT NOT NULL DEFAULT 'MTF',
+  hours_back REAL NOT NULL DEFAULT 0,
+  amount INTEGER NOT NULL DEFAULT 0,
+  gtt_stop_pct REAL NOT NULL DEFAULT -0.60,
+  gtt_target_pct REAL NOT NULL DEFAULT 20,
+  nse_app_id TEXT NOT NULL DEFAULT '',
+  nse_it TEXT NOT NULL DEFAULT '',
+  telegram_enabled INTEGER NOT NULL DEFAULT 0,
+  updated_utc TEXT
+);
+"""
+
+CREATE_TRADE_ENTRIES = """
+CREATE TABLE IF NOT EXISTS trade_entries(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  announcement_id INTEGER,
+  announcement_snapshot TEXT,
+  symbol TEXT NOT NULL,
+  exchange TEXT NOT NULL DEFAULT 'NSE',
+  transaction_type TEXT NOT NULL DEFAULT 'BUY',
+  amount INTEGER,
+  quantity INTEGER,
+  stop_loss_pct REAL,
+  target_pct REAL,
+  order_type TEXT,
+  product_type TEXT,
+  variety TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  order_result TEXT,
+  created_utc TEXT NOT NULL,
+  placed_utc TEXT
+);
+"""
+
+
+def db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+
+def db_init(conn: sqlite3.Connection) -> None:
+    conn.execute(CREATE_SETTINGS)
+    conn.execute(CREATE_TRADE_ENTRIES)
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (id) VALUES (1)"
+    )
+    conn.commit()
+
+
+def get_settings(conn: sqlite3.Connection) -> dict:
+    row = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+    return dict(row)
+
+
+def update_settings(conn: sqlite3.Connection, fields: dict) -> dict:
+    import datetime as dt
+
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(
+        f"UPDATE settings SET {cols}, updated_utc = ? WHERE id = 1",
+        (*fields.values(), dt.datetime.now(dt.timezone.utc).isoformat()),
+    )
+    conn.commit()
+    return get_settings(conn)
+
+
+def create_trade_entry(conn: sqlite3.Connection, fields: dict) -> dict:
+    import datetime as dt
+
+    fields = {**fields, "created_utc": dt.datetime.now(dt.timezone.utc).isoformat()}
+    cols = ", ".join(fields.keys())
+    placeholders = ", ".join("?" for _ in fields)
+    cur = conn.execute(f"INSERT INTO trade_entries ({cols}) VALUES ({placeholders})", list(fields.values()))
+    conn.commit()
+    return get_trade_entry(conn, cur.lastrowid)
+
+
+def get_trade_entry(conn: sqlite3.Connection, entry_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM trade_entries WHERE id = ?", (entry_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_trade_entries(conn: sqlite3.Connection, announcement_id: Optional[int] = None) -> list[dict]:
+    if announcement_id is not None:
+        rows = conn.execute(
+            "SELECT * FROM trade_entries WHERE announcement_id = ? ORDER BY id DESC", (announcement_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM trade_entries ORDER BY id DESC LIMIT 200").fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_entry_placed(conn: sqlite3.Connection, entry_id: int, order_result: dict, status: str) -> dict:
+    import datetime as dt
+
+    conn.execute(
+        "UPDATE trade_entries SET status = ?, order_result = ?, placed_utc = ? WHERE id = ?",
+        (status, json.dumps(order_result, default=str), dt.datetime.now(dt.timezone.utc).isoformat(), entry_id),
+    )
+    conn.commit()
+    return get_trade_entry(conn, entry_id)

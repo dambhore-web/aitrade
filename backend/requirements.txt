@@ -13,3 +13,4 @@ requests>=2.31
 onnxruntime>=1.19
 transformers>=4.44
 openai>=1.40
+psutil>=6.0

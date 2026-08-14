@@ -205,25 +205,88 @@ financial_result_flag`).
 
 ### Module B — Announcement-Driven Trading
 
-**Wraps:** the rule layer inside `Kite_API_31.py`
-(`check_category_exists`, blacklist-keyword filters, `get_stop_loss(category)`,
-`check_bse_title`) — decomposed out of the monolith, not copied wholesale.
+**Status: partially built (manual trade desk), the automatic detect→fire
+loop is explicitly NOT ported yet — see the scoping note below.**
+
+**Wraps:**
+- The **GTT Parameters / Zerodha Configuration / NSE App Configuration**
+  input panel from `Kite_API_31.py`'s PySimpleGUI app (`main()`, window
+  title "Trading Bot - Professional Edition") — Amount, Order Variety, Order
+  Type, Market/Product Type, GTT Stop Loss %, GTT Target %, Past Hours, NSE
+  App ID/IT, Send-to-Telegram — replicated as a real form with persisted
+  settings, replacing that app's pickle-based config storage
+  (`inputs/global.pickle`).
+- `place_orders` / `place_orders_parallel` (`Kite_API_31.py:651-757`) —
+  **ported**, not imported: that file has substantial module-level side
+  effects on import (reads `Zerodha_Orders.xlsx`, builds GUI-supporting
+  state), so importing it wholesale to reuse two self-contained functions
+  would be far riskier than porting them faithfully. Lives at
+  `announcement_trading/execution.py`, documented as a port with its exact
+  source line range.
+- The shared multi-account Kite session (`Trading_bot/kite_instances.pkl`,
+  produced by that same GUI's "Load User Data" button) — **read, not
+  regenerated**: this backend surfaces its status (accounts connected,
+  margin, multiplier) and uses it for order placement, but never triggers
+  the Selenium login that produces it. That login uses plaintext
+  credentials from `Zerodha_Orders.xlsx` (password/API secret/TOTP seed per
+  account, confirmed by inspecting the pickle's structure) — a real user
+  action, not something this backend does unattended.
+
+**NOT wrapped in this pass:** the actual BSE/NSE-scrape → BERT/GPT
+classification → category/stop-loss rules → automatic `place_orders_parallel`
+loop (`the_thread`, the body of `Kite_API_31.py`'s `main()` event loop) —
+that's the "as it is" auto-trading behavior, and it's large, unaudited by
+this project, and was never call-linked to the announcement that triggered
+it even in the original (see below). Replicating it automatically was
+judged too large a leap to make silently; what's built instead achieves the
+same practical goal (react to an announcement, place a real order, keep a
+record) through a **manually-triggered per-announcement flow** — see
+Responsibilities.
+
+**Why a new `trade_entries` table, not just an intent log:** the original
+never actually linked a placed order to the announcement that triggered it
+— `place_orders_parallel(...)` takes no message/announcement argument, and
+the only place the two were ever associated (`data_symbol`, a `{SYMBOL,
+MESSAGE}` DataFrame) was in-memory only, with its one `to_csv` save
+commented out. `trade_entries` fixes this going forward: every entry is
+created with `announcement_id` + a snapshot of the triggering title, visible
+inline wherever that announcement appears in the UI.
 
 **Responsibilities**
-- Subscribe to Module A's feed.
-- Evaluate each enriched announcement against configurable rules.
-- Emit trade intents to the Shared Execution Engine.
+- Persist trading settings (the panel above), one active configuration.
+- Given an announcement, let a human save trade parameters (symbol, amount,
+  notes) against it — a `trade_entries` row, `status='draft'`.
+- On explicit request (a distinct "Place order (LIVE)" action, not automatic),
+  fetch current LTP, compute stop-loss/target prices from the entry's or the
+  active settings' GTT %, and call the ported `place_orders_parallel` across
+  every connected account from `kite_instances.pkl`; record the per-account
+  result on the same row (`status='placed'|'failed'`).
 
 **API**
-- `GET/PUT /announcement-trading/rules` — rule config, stored as data (DB/JSON),
-  editable from the UI, not hardcoded.
-- `GET /announcement-trading/intents` — log of generated intents + outcome.
-- `POST /announcement-trading/enabled` — kill switch, **default OFF**.
+- `GET/PUT /announcement-trading/settings`
+- `GET /announcement-trading/session-status` — redacted (see Security below)
+- `GET /announcement-trading/entries?announcement_id=` / `POST /entries`
+- `POST /announcement-trading/entries/{id}/place-order` — the live-order action
+
+**Security:** `kite_instances.pkl`'s per-account dict contains plaintext
+`password`/`API SECRET`/`TOTP_KEY` (confirmed by inspection, never printed
+during development). `GET /session-status` returns only an explicit
+allowlist (Zerodha ID, multiplier, margin) — the raw dict and the
+`KiteConnect` instances themselves never leave the backend process. Neither
+`Zerodha_Orders.xlsx` nor `kite_instances.pkl` are read into this repo or
+committed anywhere.
 
 **Acceptance criteria**
-- Every intent is logged even while disabled (dry-run visibility before arming
-  live trading).
-- Rule changes take effect without a restart.
+- A saved trade entry is visible, with its full parameters and outcome, from
+  the announcement that prompted it.
+- Placing an order requires an explicit, separate action from saving —
+  saving parameters never places an order by itself.
+- `place-order` fails clearly (not silently) when no Kite session exists.
+
+**Follow-up (not yet built):** the automatic detection→classification→order
+loop described above, gated behind its own explicit start/stop control
+(matching the legacy app's own START CODE/STOP CODE requirement) and a kill
+switch defaulting OFF, per §0 rule 7.
 
 ---
 
@@ -386,7 +449,49 @@ only way to get a trustworthy "what do I currently hold, and why" view.
 - **The announcement listener runs as a background thread, not an asyncio
   task**, reusing `announcement_listener_v2.py`'s own lock-file guard
   (`Trading_bot/listener.lock`) so it refuses to run two instances at once.
-  Known quirk inherited from the legacy script: if the backend is killed
-  ungracefully (or restarted via `uvicorn --reload` mid-cycle), the lock file
-  can be left stale and needs manual deletion before the listener will start
-  again — same limitation the standalone script already had.
+  The inherited quirk this caused in practice — `uvicorn --reload` tearing
+  down the old worker before its thread's `finally: release_lock()` ran,
+  leaving a stale lock every reload — is now fixed on our side:
+  `listener.py._clear_stale_lock()` checks the lock file's recorded PID with
+  `psutil.pid_exists()` and clears it only when confirmed dead, before
+  calling the legacy `acquire_lock()`. The legacy file itself is untouched.
+
+**Decisions made while building Phase 2 (Module C) and the announcement-trading panel:**
+
+- **`marketdata.db` connections use SQLite's `mode=ro` URI flag**, not just
+  the "don't write to it" convention — verified it raises `OperationalError`
+  on any write attempt. `collector.py` stays the sole writer;
+  `scanner.py`'s own live strategy/execution loop (confirmed actively
+  running — real signals appear in the DB in real time) is never touched.
+- **`watchlist.csv` is deduped on read** (order-preserving) rather than
+  edited — it has a genuine duplicate row (`WCIL`) that surfaced as a React
+  duplicate-key warning; `zerodha_scrape_core.py`'s `dedupe_upper` already
+  treats this exact class of CSV issue as something to defend against, not
+  assume away.
+- **Two separate Kite auth mechanisms coexist in `Trading_bot`, deliberately
+  not unified**: the official Kite Connect SDK (api_key + access_token via
+  `generate_session()`, used by `auth.py`/`collector.py`/Module D) and the
+  legacy enctoken web-session style (`KITE_ENCTOKEN` etc. in `.env`, used by
+  some scraping code). `Kite_API_31.py`'s "Get Token" button produces an
+  enctoken, but the actual order-placement path
+  (`place_orders`/`place_orders_parallel`) runs on `KiteConnect` SDK
+  instances from `kite_instances.pkl`, produced separately by its "Load User
+  Data" button — that pkl, not the enctoken, is the real shared session
+  Module B and Module C's future execution wiring should both consume.
+- **`kite_instances.pkl` and `Zerodha_Orders.xlsx` are read but never
+  regenerated by this backend.** The pickle's per-account dict was confirmed
+  (by inspecting its keys only, never its values) to contain plaintext
+  `password`/`API SECRET`/`TOTP_KEY` — the login that produces it is a real
+  Selenium-driven action a human runs deliberately, not something to trigger
+  from an API call.
+- **No token, no trade — enforced in both layers, not just the backend.**
+  `place-order` hard-fails (409) with no `kite_instances.pkl`; the Trade
+  panel now also checks session status itself and disables "Place order
+  (LIVE)" with an explanatory banner before the click, rather than only
+  surfacing the failure after attempting one.
+- **Follow-up, not yet done:** `announcement_trading/session.py` (reads
+  `kite_instances.pkl`) currently lives inside Module B's package, but nothing
+  about it is announcement-specific — Module C's future order-placement work
+  needs the exact same session. Move it to `app/shared/kite_session.py` next
+  time either module's execution path is touched, so both import from one
+  place instead of Module C reaching into Module B's internals.

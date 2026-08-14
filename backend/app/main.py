@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.modules.announcement_trading.router import router as announcement_trading_router
 from app.modules.announcements.broadcaster import broadcaster
 from app.modules.announcements.listener import start_background_thread
 from app.modules.announcements.router import router as announcements_router
@@ -34,6 +35,9 @@ app.add_middleware(
 app.include_router(announcements_router, prefix="/announcements", tags=["announcements"])
 app.include_router(historical_router, prefix="/historical", tags=["historical"])
 app.include_router(equity_router, prefix="/equity", tags=["equity"])
+app.include_router(
+    announcement_trading_router, prefix="/announcement-trading", tags=["announcement-trading"]
+)
 
 
 @app.on_event("startup")

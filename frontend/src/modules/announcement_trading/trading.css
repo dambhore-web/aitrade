@@ -1,0 +1,210 @@
+.banner {
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.banner-error {
+  background: #fde2e2;
+  color: #8a1c1c;
+  border: 1px solid #f3a6a6;
+}
+.banner-warning {
+  background: #fff4d6;
+  color: #7a5b00;
+  border: 1px solid #f0d478;
+}
+
+.trading-settings {
+  margin-bottom: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.collapse-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.9rem;
+  background: #fafafa;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-pill {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+.session-ok {
+  background: #d4f0dc;
+  color: #14532d;
+}
+.session-off {
+  background: #fde2e2;
+  color: #8a1c1c;
+}
+
+.settings-body {
+  padding: 0.9rem;
+  border-top: 1px solid #eee;
+}
+
+.account-list {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #444;
+}
+.settings-grid input,
+.settings-grid select {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+.settings-grid .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.save-button {
+  padding: 0.5rem 1.3rem;
+  border-radius: 6px;
+  border: 1px solid #12121c;
+  background: #ffe600;
+  font-weight: 700;
+  cursor: pointer;
+}
+.save-confirm {
+  margin-left: 0.6rem;
+  color: #1a7f37;
+  font-size: 0.85rem;
+}
+
+/* Trade panel */
+.trade-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fdfdfd;
+}
+.trade-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.trade-panel-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.close-button {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+}
+.trade-panel-message {
+  color: #555;
+  font-size: 0.85rem;
+  margin: 0.3rem 0 0.9rem;
+}
+
+.trade-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.trade-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #444;
+}
+.trade-form input {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+.trade-form .notes-field {
+  flex: 1;
+  min-width: 160px;
+}
+.trade-form button {
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #12121c;
+  background: #ffe600;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trade-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.entries-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.entries-table th,
+.entries-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+.entries-table th {
+  background: #12121c;
+  color: #fff;
+}
+.status-draft {
+  color: #8a6d00;
+}
+.status-placed {
+  color: #1a7f37;
+  font-weight: 600;
+}
+.status-failed {
+  color: #b3261e;
+  font-weight: 600;
+}
+.place-order-button {
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid #b3261e;
+  background: #fde2e2;
+  color: #8a1c1c;
+  font-weight: 600;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
