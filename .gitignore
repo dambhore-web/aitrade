@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.vite/
+
+# --- Secrets & local config ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Broker sessions / tokens (never commit these) ---
+access_token_cache.json
+*_session_cache.json
+kite_instances.pkl
+*.pkl
+
+# --- Local data / DBs (generated at runtime) ---
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
