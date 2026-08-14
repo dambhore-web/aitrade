@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Absolute path to the sibling Trading_bot checkout this backend wraps.
     legacy_root: Path = Path(r"D:\Trading System\Trading_bot")
 
+    # Module C (Equity Trading) wraps new_trade_tool specifically, a
+    # separate directory (with its own common.py/utils_time.py/db.py) one
+    # level further in -- kept as its own settings field rather than a
+    # derived path since that subtree has already moved once before (see
+    # its own config.py comment) and may again.
+    new_trade_tool_root: Path = Path(
+        r"D:\Trading System\Trading_bot\_archive\other_bot_projects\new_trade_tool"
+    )
+
     # CORS origins allowed to call this API -- just the local Vite dev server
     # and local build preview for now (single-user, local-only platform).
     cors_origins: list[str] = [

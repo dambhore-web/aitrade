@@ -1,0 +1,55 @@
+.equity-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.symbol-select-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #444;
+  max-width: 320px;
+}
+.symbol-select-label select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.chart-container {
+  width: 100%;
+  border: 1px solid #ececf6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.signals-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.signals-table th,
+.signals-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+.signals-table th {
+  background: #12121c;
+  color: #fff;
+}
+.sig-sell {
+  color: #b3261e;
+  font-weight: 600;
+}
+.sig-cover {
+  color: #1a7f37;
+  font-weight: 600;
+}

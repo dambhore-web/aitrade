@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from app.core.config import get_settings
 
 _path_added = False
+_ntt_path_added = False
 _env_loaded = False
 
 
@@ -28,6 +29,20 @@ def add_legacy_root_to_path() -> None:
     if root not in sys.path:
         sys.path.insert(0, root)
     _path_added = True
+
+
+def add_new_trade_tool_root_to_path() -> None:
+    """Module C (Equity Trading) wraps new_trade_tool, which has its own
+    common.py/utils_time.py/db.py distinct from the ones at LEGACY_ROOT --
+    needs its own sys.path entry."""
+    global _ntt_path_added
+    if _ntt_path_added:
+        return
+    settings = get_settings()
+    root = str(settings.new_trade_tool_root)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    _ntt_path_added = True
 
 
 def load_legacy_env() -> None:
