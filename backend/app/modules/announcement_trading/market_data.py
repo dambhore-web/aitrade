@@ -36,6 +36,25 @@ polls every 1.5s, and firing a new Firefox launch every cycle while earlier
 ones are still running is exactly the pattern that left 26 orphaned
 firefox.exe processes after the freeze incident.
 
+Second deliberate change, added after live testing showed NSE now returns
+Akamai bot-check cookies (AKA_A2, bm_sz, ak_bmsc, _abck, RT) instead of
+nsit/nseappid on the first page load: NSE_website_opener.py's get_app_id()
+never had to handle this -- it reads cookies right after driver.get()
+returns with no wait at all, which only ever worked if nsit/nseappid were
+already present by then. The proof this is a newer NSE-side behaviour, not
+a logic gap here: Kite_API_31.py's set_header() has a commented-out
+'Cookie' line -- a one-time real capture from a passed browser session --
+carrying the Akamai cookies *and* nsit/nseappid together, meaning even the
+original author had, at some point, to work around the same Akamai
+challenge by hand. Akamai's JS collects a sensor payload and POSTs it
+asynchronously; nsit/nseappid are only issued on a *follow-up* request
+after that validates. _refresh_nse_cookies_via_browser() now polls for the
+Akamai cookies, waits for the async POST, re-navigates once to trigger the
+follow-up request, and keeps polling (up to 30s) for nsit/nseappid before
+giving up -- ported behaviour is unchanged (same URL, same cookies read
+off the same headless Firefox), this only fixes the timing/sequencing
+get_app_id() itself never accounted for.
+
 The TickerPlant merge step (an optional local file at D:\\ticker\\tp.csv in
 the original, wrapped in its own try/except that silently continues on
 failure) is not ported -- best-effort/optional there, and its absence here
@@ -98,6 +117,18 @@ _news_type: Optional[list[str]] = None
 
 _nse_refresh_in_progress = threading.Event()
 _nse_cookies_refreshed: bool = False
+_last_nse_refresh_attempt: float = 0.0
+# 20+ minutes of live testing (see docs/requirements.md decisions log) showed
+# every single automatic attempt getting only Akamai bot-check cookies, with
+# the full nsit+nseappid pair landing zero times across dozens of tries --
+# this isn't a race a retry-every-failure loop can win, and hammering the
+# same Akamai-protected endpoint every ~10-15s is itself a bot signal that
+# plausibly makes the block worse, not better. Deliberate departure from "as
+# it is" (which has no cooldown at all): back off hard between automatic
+# attempts so the loop stops hammering NSE while the real fix -- pasting
+# nsit/nseappid from your own browser into Settings, see
+# seed_nse_cookies_from_settings() below -- does the actual work.
+NSE_REFRESH_COOLDOWN_SECONDS = 900
 
 
 def _refresh_nse_cookies_via_browser() -> tuple[str, str]:
@@ -126,16 +157,34 @@ def _refresh_nse_cookies_via_browser() -> tuple[str, str]:
     driver.set_page_load_timeout(30)
     try:
         driver.get(NSE_ANNOUNCEMENTS_PAGE)
-        # NSE sets nsit/nseappid via JS shortly *after* the page reports
-        # loaded (confirmed empirically: without this wait, every real
-        # attempt here returned no cookies at all -- driver.get() returning
-        # is not the same event as "NSE's anti-bot JS has run"). Not in the
-        # NSE_website_opener.py version this function otherwise ports
-        # faithfully; carried over from the equivalent wait in
-        # NSE_BSE_DATA_PULL.py's own (unrelated, historical-pull-only)
-        # get_app_id(), which exists specifically because of this same race.
-        time.sleep(3)
-        cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
+        # A single fixed sleep(3) here used to fail every time, but not with
+        # "no cookies" -- it got real cookies back, just the wrong ones:
+        # Akamai's bot-check cookies (AKA_A2, bm_sz, ak_bmsc, _abck, RT),
+        # never nsit/nseappid. The proof of what's actually going on is
+        # sitting in Kite_API_31.py itself: set_header() has a commented-out
+        # 'Cookie' line (a one-time real capture from a passed browser
+        # session) that carries the Akamai cookies *and* nsit/nseappid
+        # together in one string. That's the tell -- nsit/nseappid aren't
+        # set on first load. Akamai's JS collects a sensor payload, POSTs it
+        # asynchronously in the background, and only a *follow-up* request
+        # -- after that POST is validated -- gets the real app cookies back.
+        # driver.get() returning, or waiting longer on the same page, was
+        # never going to produce them; the page has to be hit again once the
+        # challenge clears. So: poll for the Akamai cookies to land, give
+        # the async validation a moment, then re-navigate to trigger that
+        # follow-up request, and keep polling for nsit/nseappid to appear.
+        cookies: dict[str, str] = {}
+        deadline = time.time() + 30
+        reloaded = False
+        while time.time() < deadline:
+            time.sleep(2)
+            cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
+            if "nsit" in cookies and "nseappid" in cookies:
+                break
+            if not reloaded and "_abck" in cookies:
+                time.sleep(3)  # let the async sensor POST land before reloading
+                driver.get(NSE_ANNOUNCEMENTS_PAGE)
+                reloaded = True
         if "nsit" not in cookies or "nseappid" not in cookies:
             logger.warning("NSE did not set expected cookies (got: %s)", list(cookies.keys()))
             return "xx", "xx"
@@ -164,8 +213,12 @@ def _maybe_refresh_nse_session() -> None:
     earlier incident. This preserves "retries every failure, no artificial
     delay" while still guaranteeing at most one browser session at a time.
     """
+    global _last_nse_refresh_attempt
     if _nse_refresh_in_progress.is_set():
         return
+    if time.time() - _last_nse_refresh_attempt < NSE_REFRESH_COOLDOWN_SECONDS:
+        return
+    _last_nse_refresh_attempt = time.time()
     _nse_refresh_in_progress.set()
 
     def _watchdog():
@@ -174,9 +227,9 @@ def _maybe_refresh_nse_session() -> None:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(_refresh_nse_cookies_via_browser)
                 try:
-                    app_id, nsit = future.result(timeout=60)
+                    app_id, nsit = future.result(timeout=90)
                 except FuturesTimeoutError:
-                    logger.error("NSE cookie refresh timed out after 60s")
+                    logger.error("NSE cookie refresh timed out after 90s")
                     return
             if app_id == "xx":
                 logger.warning("NSE cookie refresh failed -- browser could not establish a session")
@@ -191,6 +244,28 @@ def _maybe_refresh_nse_session() -> None:
             _nse_refresh_in_progress.clear()
 
     threading.Thread(target=_watchdog, name="nse-cookie-refresh", daemon=True).start()
+
+
+def seed_nse_cookies_from_settings(app_id: str, nsit: str) -> bool:
+    """Apply nsit/nseappid pasted into Settings (the "NSE App ID"/"NSE IT"
+    fields -- already in the schema/DB/UI, but never previously read by
+    anything on this path) to the live session. This is the reliable
+    fallback the automatic Selenium refresh above cannot currently deliver:
+    grab a real nsit/nseappid pair from your own logged-in browser's
+    devtools -> Application -> Cookies for nseindia.com, paste them into
+    Settings, Save -- same manual-refresh pattern already used for
+    KITE_ENCTOKEN elsewhere in this codebase. Called on backend startup with
+    whatever was last saved, and again immediately after every settings
+    save so a fresh paste takes effect without restarting anything. No-ops
+    on blank/placeholder values so it never clobbers a working session with
+    empty settings."""
+    global _session
+    if not app_id or not nsit or app_id == "xx" or nsit == "xx":
+        return False
+    _session.cookies.update({"nseappid": app_id, "nsit": nsit})
+    logger.info("NSE session cookies seeded from Settings")
+    return True
+
 
 # Last fetch error per source, surfaced via /announcement-trading/auto/status
 # so "why is the dot red" is answerable from the UI, not just a scrolling

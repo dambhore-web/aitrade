@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from . import auto_loop, db, execution, session, session_login
+from . import auto_loop, db, execution, market_data, session, session_login
 from .broadcaster import broadcaster
 from .schemas import (
     ActivityResponse,
@@ -24,6 +24,15 @@ router = APIRouter()
 _conn = db.db_connect()
 db.db_init(_conn)
 
+# Seed the live NSE session with whatever nsit/nseappid were last saved to
+# Settings -- see seed_nse_cookies_from_settings() for why: automatic
+# Selenium refresh proved unreliable against Akamai in live testing, this
+# manual-paste path is the one that actually works.
+_startup_settings = db.get_settings(_conn)
+market_data.seed_nse_cookies_from_settings(
+    _startup_settings.get("nse_app_id", ""), _startup_settings.get("nse_it", "")
+)
+
 
 @router.get("/settings", response_model=SettingsOut)
 def get_settings() -> dict:
@@ -41,6 +50,7 @@ def update_settings(body: SettingsUpdate) -> dict:
         raise HTTPException(400, "No fields to update")
     s = db.update_settings(_conn, fields)
     s["telegram_enabled"] = bool(s["telegram_enabled"])
+    market_data.seed_nse_cookies_from_settings(s.get("nse_app_id", ""), s.get("nse_it", ""))
     return s
 
 

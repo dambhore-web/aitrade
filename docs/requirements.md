@@ -631,3 +631,57 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   this reason. Added the same wait + validation to the faithful port
   here — the one addition beyond a straight port, and it's a reliability
   fix for a race the original also had, not a logic change.
+  **`sleep(3)` fix deployed, but live logs then showed a new, deeper
+  symptom:** real cookies were coming back every attempt, just the wrong
+  ones — Akamai bot-management cookies (`AKA_A2`, `bm_sz`, `ak_bmsc`,
+  `_abck`, `RT`), never `nsit`/`nseappid`. User pushed back hard,
+  correctly: *"My existing code Kite_API_31.py works perfectly fine...
+  Don't think you are using the same logic."* Re-traced
+  `NSE_website_opener.py` character-by-character on that challenge rather
+  than re-guessing: `get_app_id()` really is a straight, faithful match —
+  same URL, same headless Firefox, same cookie names, no extra headers or
+  anti-detection args (the one stealth flag in that file,
+  `disable-blink-features=AutomationControlled`, is applied to an unused
+  `chrome_options` object — dead code, never reaches the Firefox session
+  that actually runs). The real evidence of what's going on was sitting in
+  `Kite_API_31.py` itself: `set_header()` has a commented-out `'Cookie'`
+  line — a one-time real capture pasted in from a passed browser session —
+  carrying the Akamai cookies *and* `nsit`/`nseappid` together, proving
+  even the original author had, at some point, to work around this same
+  Akamai challenge by hand rather than have `get_app_id()` reliably clear
+  it unattended. Akamai's JS collects a sensor payload and POSTs it
+  asynchronously after first load; `nsit`/`nseappid` are only issued on a
+  *follow-up* request once that validates — a single `get()` plus any
+  fixed wait was never going to produce them. Fixed by polling for the
+  Akamai cookies (up to 30s), waiting for the async POST, re-navigating
+  once to trigger the follow-up request, then continuing to poll for
+  `nsit`/`nseappid` before giving up; outer watchdog timeout raised
+  60s → 90s to give this room. Ported logic is unchanged — this is a
+  second reliability fix for a timing/sequencing issue `get_app_id()`
+  itself never had to handle, not a departure from it.
+  **Confirmed by 20+ minutes of live testing that this is a hard block, not
+  a race:** the auto-loop hammered the refresh every cycle from 18:09 to
+  18:32 — dozens of attempts, one every ~10-15s. Real result: Akamai-only
+  cookies every single time, except twice (18:22:53, 18:23:14) where `nsit`
+  alone showed up — `nseappid` never did, not once. Two cookies set by two
+  separate mechanisms, and the harder one never clears. No amount of
+  polling or reloading was going to close that gap; retrying every cycle
+  was just repeatedly hitting Akamai's protected endpoint at machine
+  cadence, which is itself a bot signal likely making the block worse, not
+  better.
+  **Fix, in two parts:**
+  (1) `NSE_REFRESH_COOLDOWN_SECONDS = 900` gates `_maybe_refresh_nse_session()`
+  — a real departure from "as it is" (no cooldown at all), justified this
+  time by hard evidence rather than a guess: the original's assumption
+  (retrying costs nothing, might get lucky) doesn't hold against an active
+  bot-detection wall that punishes repeated hits.
+  (2) `seed_nse_cookies_from_settings()` — wired the `nse_app_id`/`nse_it`
+  fields that were already sitting in the schema, DB, and Settings UI (visible,
+  saveable) but never once read by anything on the live NSE path — into the
+  session, on backend startup and again after every settings save. Same
+  manual-refresh pattern already used for `KITE_ENCTOKEN` elsewhere: grab a
+  real `nsit`/`nseappid` pair from your own logged-in browser's devtools,
+  paste into Settings, Save — done, no fight with Akamai. The automatic
+  Selenium attempt is kept as a best-effort background try (now on a long
+  cooldown) in case it ever clears on its own; it is not the primary path
+  anymore.
