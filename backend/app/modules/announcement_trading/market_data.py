@@ -126,8 +126,20 @@ def _refresh_nse_cookies_via_browser() -> tuple[str, str]:
     driver.set_page_load_timeout(30)
     try:
         driver.get(NSE_ANNOUNCEMENTS_PAGE)
+        # NSE sets nsit/nseappid via JS shortly *after* the page reports
+        # loaded (confirmed empirically: without this wait, every real
+        # attempt here returned no cookies at all -- driver.get() returning
+        # is not the same event as "NSE's anti-bot JS has run"). Not in the
+        # NSE_website_opener.py version this function otherwise ports
+        # faithfully; carried over from the equivalent wait in
+        # NSE_BSE_DATA_PULL.py's own (unrelated, historical-pull-only)
+        # get_app_id(), which exists specifically because of this same race.
+        time.sleep(3)
         cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
-        return cookies.get("nseappid", "xx"), cookies.get("nsit", "xx")
+        if "nsit" not in cookies or "nseappid" not in cookies:
+            logger.warning("NSE did not set expected cookies (got: %s)", list(cookies.keys()))
+            return "xx", "xx"
+        return cookies["nseappid"], cookies["nsit"]
     except Exception:
         logger.exception("NSE cookie refresh browser session failed")
         return "xx", "xx"

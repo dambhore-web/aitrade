@@ -618,7 +618,16 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   delay was added), but gated the browser launch on "one already in
   flight" rather than time, since firing a new Firefox launch every 1.5s
   cycle while an earlier one is still running is exactly the pattern that
-  left 26 orphaned `firefox.exe` processes after the freeze incident. Not
-  yet confirmed to actually clear NSE's anti-bot check end-to-end in
-  production — the mechanism is real and properly wired, but its
-  real-world success rate hasn't been observed yet.
+  left 26 orphaned `firefox.exe` processes after the freeze incident.
+  **First live attempts all failed** (`"NSE cookie refresh failed --
+  browser could not establish a session"`, repeatedly, in the real log) --
+  root cause confirmed empirically, not guessed: NSE sets `nsit`/
+  `nseappid` via JS *after* the page reports loaded, so reading
+  `driver.get_cookies()` immediately after `driver.get()` returns
+  routinely misses them. `NSE_website_opener.py`'s `get_app_id()` (the
+  function actually on this call path) doesn't wait for that; the
+  unrelated `get_app_id()` inside `NSE_BSE_DATA_PULL.py` does, with a
+  `time.sleep(3)` and explicit cookie-presence validation, for exactly
+  this reason. Added the same wait + validation to the faithful port
+  here — the one addition beyond a straight port, and it's a reliability
+  fix for a race the original also had, not a logic change.
