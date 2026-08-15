@@ -36,7 +36,9 @@ _state = {
 
 def get_status() -> dict:
     with _state_lock:
-        return dict(_state)
+        state = dict(_state)
+    state["bse_error"], state["nse_error"] = market_data.get_last_fetch_errors()
+    return state
 
 
 def _set_state(**kwargs) -> None:

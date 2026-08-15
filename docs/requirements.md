@@ -167,7 +167,18 @@ if the legacy tree ever moves again (as its own history shows it has before).
 
 ### Module A — Corporate Announcements Feed
 
-**Wraps:** `announcement_listener_v2.py`, `financial_result_checker.py`
+**Status: built but unmounted — dropped by user decision.** TrueData was
+judged not needed: Module B's own direct BSE/NSE scan already covers
+corporate announcements end to end, so running a second, separate
+announcement source was redundant and confusing (it produced two
+disconnected-looking "announcement" surfaces in the UI). `main.py` no
+longer starts the listener thread or mounts its router; the code under
+`backend/app/modules/announcements/` and the DB it wrote to
+(`Trading_bot/announcements_seen.db`) are untouched, not deleted, in case
+this is wanted again later.
+
+**Wraps (for reference, not currently running):**
+`announcement_listener_v2.py`, `financial_result_checker.py`
 (ONNX FinBERT sentiment), `bonus_buyback_extract.py`, the scraping portions of
 `nse_bse_extraction_tool.py` relevant to announcement capture.
 
@@ -563,3 +574,51 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   from "broken"; now it surfaces a clear error instead. A frozen backend
   process itself still requires a manual restart to recover — these fixes
   prevent the freeze, they don't un-freeze an already-stuck process.
+- **TrueData dropped entirely (Module A unmounted), by user decision.**
+  Judged redundant: Module B's own BSE/NSE scan already covers corporate
+  announcements end to end, and running both produced two disconnected
+  "announcement" surfaces in the UI. `main.py` no longer starts the
+  listener or mounts its router. Code and DB untouched, just unmounted —
+  see the updated Module A section above. Frontend consolidated to one page
+  (`AnnouncementTradingPage.tsx`, the renamed former `AutomatedTradingPage`)
+  under the `/announcements` route; the separate `/auto-trading` route, the
+  old TrueData-backed `AnnouncementsPage.tsx`, and `TradePanel.tsx` (its
+  manual per-announcement trade UI, which only made sense against that
+  TrueData list) were deleted.
+- **Added persistent file logging** (`backend/logs/app.log`, rotating,
+  10MB × 3 backups) alongside the console — previously logs only existed in
+  whatever terminal happened to be running uvicorn at the time, with no
+  fixed place to look.
+- **NSE cookie auto-refresh, ported — corrected after an incomplete first
+  read.** An earlier pass here concluded the cookie-refresh path was dead
+  code, because `nse_data()`'s effective definition ignores its own
+  `cookies` argument. That was wrong — caught by re-tracing
+  `fetch_data_parallel_bse_nse()` all the way through on request, reading
+  `nse_data_new()` to its actual end rather than stopping partway through:
+  its `except` block closes the shared `session`, opens a fresh
+  `requests.Session()`, and does `session.headers.update(set_header())` +
+  `session.cookies.update(cookies)` — which `session.get()` then carries on
+  every later call automatically, no per-call `cookies=` needed. The
+  mechanism is real: NSE fetches run bare until the first failure, which
+  triggers `get_app_id()` (`NSE_website_opener.py` — confirmed as the one
+  actually imported and called by `nse_data_new()`, not the
+  differently-scoped local `get_app_id()` inside
+  `NSE_BSE_DATA_PULL.py`'s unrelated historical-pull function, which was
+  briefly and mistakenly considered first) to open a headless Firefox,
+  visit NSE's real announcements page, and read back the `nsit`/`nseappid`
+  cookies its anti-bot check sets.
+  Ported faithfully as `_refresh_nse_cookies_via_browser()` +
+  `_maybe_refresh_nse_session()` (Selenium 4 API — the original used
+  `executable_path=`, removed in Selenium 4), with the same two-layer
+  timeout discipline as the Generate Token fix
+  (`command_executor.set_timeout` + outer `ThreadPoolExecutor` watchdog) so
+  a geckodriver crash can't cause another full-process freeze.
+  **One deliberate change from "as it is":** the original retries on every
+  single failed cycle with no cooldown at all — kept that (no artificial
+  delay was added), but gated the browser launch on "one already in
+  flight" rather than time, since firing a new Firefox launch every 1.5s
+  cycle while an earlier one is still running is exactly the pattern that
+  left 26 orphaned `firefox.exe` processes after the freeze incident. Not
+  yet confirmed to actually clear NSE's anti-bot check end-to-end in
+  production — the mechanism is real and properly wired, but its
+  real-world success rate hasn't been observed yet.

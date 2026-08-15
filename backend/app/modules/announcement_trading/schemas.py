@@ -121,3 +121,5 @@ class AutoLoopStatus(BaseModel):
     state_bse: Optional[int] = None
     state_nse: Optional[int] = None
     processed_count: int
+    bse_error: Optional[str] = None
+    nse_error: Optional[str] = None

@@ -4,10 +4,18 @@ import { API_BASE_URL, apiGet, apiPost } from "../../shared/api";
 import type { ActivityItem, ActivityResponse, AutoLoopStatus } from "./types";
 import "./trading.css";
 
-function ConnectionDot({ state, label }: { state: number | null | undefined; label: string }) {
+function ConnectionDot({
+  state,
+  label,
+  error,
+}: {
+  state: number | null | undefined;
+  label: string;
+  error?: string | null;
+}) {
   const color = state === 1 ? "#22c55e" : state === 0 ? "#ef4444" : "#999";
   return (
-    <span className="conn-dot-wrap">
+    <span className="conn-dot-wrap" title={error ?? undefined}>
       <span className="conn-dot" style={{ background: color }} />
       {label}
     </span>
@@ -77,8 +85,8 @@ export default function AutoLoopControl() {
         >
           STOP
         </button>
-        <ConnectionDot state={loopStatus.data?.state_bse} label="BSE" />
-        <ConnectionDot state={loopStatus.data?.state_nse} label="NSE" />
+        <ConnectionDot state={loopStatus.data?.state_bse} label="BSE" error={loopStatus.data?.bse_error} />
+        <ConnectionDot state={loopStatus.data?.state_nse} label="NSE" error={loopStatus.data?.nse_error} />
         <span className="processed-count">{loopStatus.data?.processed_count ?? 0} processed</span>
         <span className={loopStatus.data?.running ? "loop-pill loop-running" : "loop-pill loop-stopped"}>
           {loopStatus.data?.running ? "running" : "stopped"}
@@ -88,6 +96,16 @@ export default function AutoLoopControl() {
       {loopStatus.data?.last_error && (
         <p className="banner banner-warning">{loopStatus.data.last_error}</p>
       )}
+      {loopStatus.data?.state_bse === 0 && (
+        <p className="banner banner-warning">BSE: {loopStatus.data.bse_error}</p>
+      )}
+      {loopStatus.data?.state_nse === 0 && (
+        <p className="banner banner-warning">NSE: {loopStatus.data.nse_error}</p>
+      )}
+      <p className="log-hint">
+        Full logs: <code>aitrade\backend\logs\app.log</code> (also printed live in the terminal running
+        uvicorn).
+      </p>
 
       <div className="table-scroll">
         <table className="activity-table">

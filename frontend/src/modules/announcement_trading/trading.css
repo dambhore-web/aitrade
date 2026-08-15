@@ -307,6 +307,17 @@
   border-radius: 50%;
   display: inline-block;
 }
+.log-hint {
+  font-size: 0.78rem;
+  color: #888;
+  margin: 0 0 0.75rem;
+}
+.log-hint code {
+  background: #eee;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
 .processed-count {
   font-size: 0.85rem;
   color: #666;

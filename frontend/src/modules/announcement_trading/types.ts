@@ -93,4 +93,6 @@ export interface AutoLoopStatus {
   state_bse: number | null;
   state_nse: number | null;
   processed_count: number;
+  bse_error: string | null;
+  nse_error: string | null;
 }
