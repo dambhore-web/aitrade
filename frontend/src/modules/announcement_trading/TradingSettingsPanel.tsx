@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "../../shared/api";
 import type { LoginJobStatus, SessionStatus, TradingSettings } from "./types";
@@ -19,24 +19,34 @@ export default function TradingSettingsPanel() {
     refetchInterval: 30000,
   });
 
-  const [loginPolling, setLoginPolling] = useState(false);
+  // Polling is driven directly by the query's own last-known `running`
+  // value (via the refetchInterval callback), not a separate boolean piece
+  // of state -- a prior version used a separate `loginPolling` flag +
+  // useEffect pair that could desync from the real job state and leave the
+  // spinner stuck forever even after the backend had genuinely finished.
   const loginStatus = useQuery({
     queryKey: ["announcement-trading", "login-status"],
     queryFn: () => apiGet<LoginJobStatus>("/announcement-trading/session/generate/status"),
-    refetchInterval: loginPolling ? 2000 : false,
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
   });
+  const loginRunning = loginStatus.data?.running ?? false;
 
   const generateToken = useMutation({
     mutationFn: () => apiPost<LoginJobStatus>("/announcement-trading/session/generate"),
-    onSuccess: () => setLoginPolling(true),
+    onSuccess: (data) => {
+      // Seed the cache immediately so the refetchInterval above (reading
+      // this same cache entry) starts polling right away.
+      queryClient.setQueryData(["announcement-trading", "login-status"], data);
+    },
   });
 
+  const wasRunningRef = useRef(false);
   useEffect(() => {
-    if (loginPolling && loginStatus.data && !loginStatus.data.running) {
-      setLoginPolling(false);
+    if (wasRunningRef.current && !loginRunning) {
       queryClient.invalidateQueries({ queryKey: ["announcement-trading", "session-status"] });
     }
-  }, [loginPolling, loginStatus.data, queryClient]);
+    wasRunningRef.current = loginRunning;
+  }, [loginRunning, queryClient]);
 
   const [form, setForm] = useState<Partial<TradingSettings>>({});
   useEffect(() => {
@@ -97,19 +107,19 @@ export default function TradingSettingsPanel() {
                   generateToken.mutate();
                 }
               }}
-              disabled={generateToken.isPending || loginPolling}
+              disabled={generateToken.isPending || loginRunning}
             >
-              {(generateToken.isPending || loginPolling) && <span className="spinner" aria-hidden="true" />}
+              {(generateToken.isPending || loginRunning) && <span className="spinner" aria-hidden="true" />}
               {generateToken.isPending
                 ? "Starting..."
-                : loginPolling
+                : loginRunning
                   ? "Signing in -- this can take 10-30s per account..."
                   : "Generate Token"}
             </button>
             {generateToken.isError && (
               <p className="banner banner-error">{(generateToken.error as Error).message}</p>
             )}
-            {loginStatus.isError && loginPolling && (
+            {loginStatus.isError && loginRunning && (
               <p className="banner banner-error">
                 Lost contact with the backend while checking progress:{" "}
                 {(loginStatus.error as Error).message}
