@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL, apiGet } from "../../shared/api";
+import AutoLoopControl from "../announcement_trading/AutoLoopControl";
 import TradePanel from "../announcement_trading/TradePanel";
 import TradingSettingsPanel from "../announcement_trading/TradingSettingsPanel";
 import type { AnnouncementOut, AnnouncementsPageResponse, ListenerStatus } from "./types";
@@ -63,6 +64,15 @@ export default function AnnouncementsPage() {
 
       <TradingSettingsPanel />
 
+      <h2>Automatic Trading</h2>
+      <p className="status-line">
+        Click START to run the automatic scan-classify-trade loop -- it scans BSE/NSE directly (a
+        separate feed from the TrueData-based list below) and shows every announcement it evaluates here,
+        live.
+      </p>
+      <AutoLoopControl />
+
+      <h2>Announcement Feed (TrueData)</h2>
       {status.data?.auth_expired && (
         <div className="banner banner-error">
           TrueData session expired -- refresh TRUEDATA_AUTH_TOKEN in Trading_bot/.env and restart the backend.
