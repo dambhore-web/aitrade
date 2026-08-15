@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPut } from "../../shared/api";
-import type { SessionStatus, TradingSettings } from "./types";
+import { apiGet, apiPost, apiPut } from "../../shared/api";
+import type { LoginJobStatus, SessionStatus, TradingSettings } from "./types";
 import "./trading.css";
 
 export default function TradingSettingsPanel() {
@@ -18,6 +18,25 @@ export default function TradingSettingsPanel() {
     queryFn: () => apiGet<SessionStatus>("/announcement-trading/session-status"),
     refetchInterval: 30000,
   });
+
+  const [loginPolling, setLoginPolling] = useState(false);
+  const loginStatus = useQuery({
+    queryKey: ["announcement-trading", "login-status"],
+    queryFn: () => apiGet<LoginJobStatus>("/announcement-trading/session/generate/status"),
+    refetchInterval: loginPolling ? 2000 : false,
+  });
+
+  const generateToken = useMutation({
+    mutationFn: () => apiPost<LoginJobStatus>("/announcement-trading/session/generate"),
+    onSuccess: () => setLoginPolling(true),
+  });
+
+  useEffect(() => {
+    if (loginPolling && loginStatus.data && !loginStatus.data.running) {
+      setLoginPolling(false);
+      queryClient.invalidateQueries({ queryKey: ["announcement-trading", "session-status"] });
+    }
+  }, [loginPolling, loginStatus.data, queryClient]);
 
   const [form, setForm] = useState<Partial<TradingSettings>>({});
   useEffect(() => {
@@ -51,8 +70,8 @@ export default function TradingSettingsPanel() {
         <div className="settings-body">
           {!sessionStatus.data?.connected && (
             <p className="banner banner-warning">
-              No shared Kite session found. Run Kite_API_31.py's "Load User Data" to authenticate before
-              placing orders -- this panel reuses that same session for every account.
+              No Kite token yet -- generate one below (logs into every account listed in
+              Zerodha_Orders.xlsx). No trade, of any kind, can happen without this.
             </p>
           )}
           {sessionStatus.data?.connected && (
@@ -65,6 +84,35 @@ export default function TradingSettingsPanel() {
               ))}
             </ul>
           )}
+
+          <div className="token-section">
+            <button
+              className="generate-token-button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "This logs into every account in Zerodha_Orders.xlsx using its stored credentials (real browser automation). Continue?"
+                  )
+                ) {
+                  generateToken.mutate();
+                }
+              }}
+              disabled={generateToken.isPending || loginPolling}
+            >
+              {loginPolling ? "Signing in..." : "Generate Token"}
+            </button>
+            {loginStatus.data && Object.keys(loginStatus.data.accounts).length > 0 && (
+              <ul className="login-progress">
+                {Object.entries(loginStatus.data.accounts).map(([id, acct]) => (
+                  <li key={id} className={`login-status-${acct.status}`}>
+                    {id}: {acct.status}
+                    {acct.message ? ` -- ${acct.message}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {loginStatus.data?.error && <p className="banner banner-error">{loginStatus.data.error}</p>}
+          </div>
 
           <div className="settings-grid">
             <label>

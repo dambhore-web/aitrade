@@ -34,6 +34,23 @@ CREATE TABLE IF NOT EXISTS settings(
 );
 """
 
+CREATE_ACTIVITY_LOG = """
+CREATE TABLE IF NOT EXISTS activity_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_utc TEXT NOT NULL,
+  symbol TEXT,
+  category TEXT,
+  sentiment TEXT,
+  text_snippet TEXT,
+  skipped INTEGER NOT NULL,
+  skip_reason TEXT,
+  order_placed INTEGER NOT NULL DEFAULT 0,
+  quantity INTEGER,
+  current_price REAL,
+  trade_entry_id INTEGER
+);
+"""
+
 CREATE_TRADE_ENTRIES = """
 CREATE TABLE IF NOT EXISTS trade_entries(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,10 +85,28 @@ def db_connect() -> sqlite3.Connection:
 def db_init(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_SETTINGS)
     conn.execute(CREATE_TRADE_ENTRIES)
+    conn.execute(CREATE_ACTIVITY_LOG)
     conn.execute(
         "INSERT OR IGNORE INTO settings (id) VALUES (1)"
     )
     conn.commit()
+
+
+def log_activity(conn: sqlite3.Connection, fields: dict) -> dict:
+    import datetime as dt
+
+    fields = {**fields, "ts_utc": dt.datetime.now(dt.timezone.utc).isoformat()}
+    cols = ", ".join(fields.keys())
+    placeholders = ", ".join("?" for _ in fields)
+    cur = conn.execute(f"INSERT INTO activity_log ({cols}) VALUES ({placeholders})", list(fields.values()))
+    conn.commit()
+    row = conn.execute("SELECT * FROM activity_log WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+
+def list_activity(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
+    rows = conn.execute("SELECT * FROM activity_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_settings(conn: sqlite3.Connection) -> dict:

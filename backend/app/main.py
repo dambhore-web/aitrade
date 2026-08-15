@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.modules.announcement_trading.broadcaster import broadcaster as auto_trading_broadcaster
 from app.modules.announcement_trading.router import router as announcement_trading_router
 from app.modules.announcements.broadcaster import broadcaster
 from app.modules.announcements.listener import start_background_thread
@@ -42,7 +43,9 @@ app.include_router(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    broadcaster.bind_loop(asyncio.get_running_loop())
+    loop = asyncio.get_running_loop()
+    broadcaster.bind_loop(loop)
+    auto_trading_broadcaster.bind_loop(loop)
     start_background_thread()
 
 

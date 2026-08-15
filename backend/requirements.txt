@@ -11,6 +11,17 @@ pandas>=2.2
 # Module A (Announcements) -- needed to import the legacy modules being wrapped
 requests>=2.31
 onnxruntime>=1.19
-transformers>=4.44
+# Pinned <5: onnx_bert.py (Kite_API_31.py's category model, reused via clean
+# import) calls tokenizer.encode_plus(), removed in transformers 5.x.
+transformers>=4.44,<5.0
 openai>=1.40
 psutil>=6.0
+
+# Announcement-driven auto-trading pipeline (Kite_API_31.py port)
+dateparser>=1.2
+nltk>=3.9
+scikit-learn>=1.5
+spacy>=3.7
+openpyxl>=3.1
+selenium>=4.8
+pyotp>=2.9

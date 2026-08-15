@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import AnnouncementsPage from "./modules/announcements/AnnouncementsPage";
+import AutomatedTradingPage from "./modules/announcement_trading/AutomatedTradingPage";
 import EquityTradingPage from "./modules/equity_trading/EquityTradingPage";
 import HistoricalPage from "./modules/historical/HistoricalPage";
 import "./App.css";
@@ -24,6 +25,9 @@ function Home() {
         <li>
           <Link to="/equity">Equity Trading</Link> -- indicator-based candles, diagnostics, and signals (read-only)
         </li>
+        <li>
+          <Link to="/auto-trading">Announcement Auto-Trading</Link> -- automatic scan-classify-trade loop
+        </li>
       </ul>
     </div>
   );
@@ -44,6 +48,7 @@ function App() {
             <NavLink to="/announcements">Announcements</NavLink>
             <NavLink to="/historical">Historical Data</NavLink>
             <NavLink to="/equity">Equity Trading</NavLink>
+            <NavLink to="/auto-trading">Auto-Trading</NavLink>
           </nav>
           <main>
             <Routes>
@@ -51,6 +56,7 @@ function App() {
               <Route path="/announcements" element={<AnnouncementsPage />} />
               <Route path="/historical" element={<HistoricalPage />} />
               <Route path="/equity" element={<EquityTradingPage />} />
+              <Route path="/auto-trading" element={<AutomatedTradingPage />} />
             </Routes>
           </main>
         </div>

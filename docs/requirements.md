@@ -205,88 +205,99 @@ financial_result_flag`).
 
 ### Module B — Announcement-Driven Trading
 
-**Status: partially built (manual trade desk), the automatic detect→fire
-loop is explicitly NOT ported yet — see the scoping note below.**
+**Status: built, including the automatic loop — full "as it is" parity was
+explicitly requested (real money, no manual-confirmation redesign).** Two
+windows, matching how the legacy app itself is laid out:
 
-**Wraps:**
-- The **GTT Parameters / Zerodha Configuration / NSE App Configuration**
-  input panel from `Kite_API_31.py`'s PySimpleGUI app (`main()`, window
-  title "Trading Bot - Professional Edition") — Amount, Order Variety, Order
-  Type, Market/Product Type, GTT Stop Loss %, GTT Target %, Past Hours, NSE
-  App ID/IT, Send-to-Telegram — replicated as a real form with persisted
-  settings, replacing that app's pickle-based config storage
-  (`inputs/global.pickle`).
-- `place_orders` / `place_orders_parallel` (`Kite_API_31.py:651-757`) —
-  **ported**, not imported: that file has substantial module-level side
-  effects on import (reads `Zerodha_Orders.xlsx`, builds GUI-supporting
-  state), so importing it wholesale to reuse two self-contained functions
-  would be far riskier than porting them faithfully. Lives at
-  `announcement_trading/execution.py`, documented as a port with its exact
-  source line range.
-- The shared multi-account Kite session (`Trading_bot/kite_instances.pkl`,
-  produced by that same GUI's "Load User Data" button) — **read, not
-  regenerated**: this backend surfaces its status (accounts connected,
-  margin, multiplier) and uses it for order placement, but never triggers
-  the Selenium login that produces it. That login uses plaintext
-  credentials from `Zerodha_Orders.xlsx` (password/API secret/TOTP seed per
-  account, confirmed by inspecting the pickle's structure) — a real user
-  action, not something this backend does unattended.
+- **Window 1 — Session & Settings** (`TradingSettingsPanel`): the GTT
+  Parameters / Zerodha Configuration / NSE App Configuration inputs from
+  `Kite_API_31.py`'s PySimpleGUI app (`main()`, "Trading Bot - Professional
+  Edition") — Amount, Order Variety, Order Type, Market/Product Type, GTT
+  Stop Loss %, GTT Target %, Past Hours, NSE App ID/IT, Send-to-Telegram —
+  as a real persisted form (`announcement_trading.db`, replacing
+  `inputs/global.pickle`), plus a **Generate Token** action that logs into
+  every account in `Zerodha_Orders.xlsx` (real Selenium logins) and produces
+  the shared session both this module and Module C's future execution
+  wiring will use.
+- **Window 2 — Live Trading** (`AutomatedTradingPage`): START/STOP for the
+  continuous scan→classify→trade loop, BSE/NSE connection-status dots, and
+  a live SSE-fed activity table — every announcement the loop looks at,
+  with its category/sentiment and either its skip reason or the order it
+  triggered. Off by default; only runs after an explicit START, mirroring
+  the legacy app's own STOP CODE/START CODE requirement (§0 rule 7) — not a
+  restriction added on top of "as it is", it's what "as it is" already does.
 
-**NOT wrapped in this pass:** the actual BSE/NSE-scrape → BERT/GPT
-classification → category/stop-loss rules → automatic `place_orders_parallel`
-loop (`the_thread`, the body of `Kite_API_31.py`'s `main()` event loop) —
-that's the "as it is" auto-trading behavior, and it's large, unaudited by
-this project, and was never call-linked to the announcement that triggered
-it even in the original (see below). Replicating it automatically was
-judged too large a leap to make silently; what's built instead achieves the
-same practical goal (react to an announcement, place a real order, keep a
-record) through a **manually-triggered per-announcement flow** — see
-Responsibilities.
+**How it was built — ported, not imported.** `Kite_API_31.py` was tested
+directly (see §9): importing it takes 70s and launches a real Firefox
+session via Selenium as a *side effect of import alone*, which itself
+failed in isolation. That ruled out running the real file as a subprocess.
+Every function on the live decision path was instead traced end-to-end and
+faithfully ported into `announcement_trading/`:
 
-**Why a new `trade_entries` table, not just an intent log:** the original
-never actually linked a placed order to the announcement that triggered it
-— `place_orders_parallel(...)` takes no message/announcement argument, and
+| File | Ported from | Notes |
+|---|---|---|
+| `market_data.py` | `bse_data`, `nse_data` (`Kite_API_31.py` defines two; the second, effective one ignores its `cookies` arg entirely), `merge_bse_nse_ticker`, `get_token`, `get_stock_info`, `get_current_price`, `historical_pricev1` | BSE is a plain public API call; NSE's cookie/Selenium machinery is dead code on the real path, confirmed by reading the effective definition. The optional TickerPlant merge (`D:\ticker\tp.csv`) is not ported — best-effort in the original too. |
+| `classification.py` | `cleanText`/`analyseText` (SVM+TF-IDF sentiment) | Category reuses `onnx_bert.py`'s `predict_with_onnx` via clean import — already self-contained, no side effects, and it's what the live pipeline actually calls (a second pickle+tfidf category model also loaded at `Kite_API_31.py` module level has no caller on the live path and isn't ported). |
+| `gates.py` | `check_symbol_and_pred_bert_existence`, `check_category_and_text_for_keywords`, `check_category_exists`, freshness check | Pure CSV/list lookups. |
+| `execution.py` | `place_orders`/`place_orders_parallel` | Unchanged from the prior pass. |
+| `pipeline.py` | `job()`'s inner per-announcement control flow, `get_stop_loss`, `margin_data_calculator.margin_calculator` (imported directly — clean, side-effect-free module) | Assembles the above into the same gate sequence, in the same order, ending in the same GTT-bracket order. |
+| `session_login.py` | `fetch_request_token`, `get_token_for_multiple_users` (`load_multi_users.py`), `initialize_kite_instances` | Runs as a background job (each login is a real 10-30s+ Selenium flow); saves the resulting session to both `kite_instances.pkl` paths the original writes. |
+| `auto_loop.py` | `the_thread`/`job()`'s scheduling (`schedule.every(1.5s)`) | Own background-thread loop calling the pieces above; in-memory dedup only, matching the original's `master_df`/`symbol_store` (not persisted across restarts). |
+
+**Scoped out, on purpose, and logged per-item rather than silently:** the
+short/ambiguous-text rescue path that re-extracts and re-classifies from the
+announcement's PDF (plus its LLM-sentiment fallback). In the original this
+only fires for short text or category="other"+sentiment="positive", as a
+rescue. Skipping it means some announcements that path *would* have rescued
+into a real category now just fall through the ordinary
+sentiment=="neutral"/category=="other" skip — a real, bounded behavior
+difference, tagged `pdf_fallback_not_ported` in the pipeline so it's visible
+in the activity feed, not hidden.
+
+**Why a new `trade_entries`/`activity_log`, not just an intent log:** the
+original never actually linked a placed order to the announcement that
+triggered it — `place_orders_parallel(...)` takes no message argument, and
 the only place the two were ever associated (`data_symbol`, a `{SYMBOL,
-MESSAGE}` DataFrame) was in-memory only, with its one `to_csv` save
-commented out. `trade_entries` fixes this going forward: every entry is
-created with `announcement_id` + a snapshot of the triggering title, visible
-inline wherever that announcement appears in the UI.
-
-**Responsibilities**
-- Persist trading settings (the panel above), one active configuration.
-- Given an announcement, let a human save trade parameters (symbol, amount,
-  notes) against it — a `trade_entries` row, `status='draft'`.
-- On explicit request (a distinct "Place order (LIVE)" action, not automatic),
-  fetch current LTP, compute stop-loss/target prices from the entry's or the
-  active settings' GTT %, and call the ported `place_orders_parallel` across
-  every connected account from `kite_instances.pkl`; record the per-account
-  result on the same row (`status='placed'|'failed'`).
+MESSAGE}` DataFrame) was in-memory only, its one `to_csv` save commented
+out. Every automatic-loop item is now logged (`activity_log`) and every
+placed order becomes a `trade_entries` row referencing it — fixed going
+forward, for both the manual per-announcement flow (still available on the
+Announcements page) and the automatic loop.
 
 **API**
 - `GET/PUT /announcement-trading/settings`
-- `GET /announcement-trading/session-status` — redacted (see Security below)
-- `GET /announcement-trading/entries?announcement_id=` / `POST /entries`
-- `POST /announcement-trading/entries/{id}/place-order` — the live-order action
+- `GET /announcement-trading/session-status` — redacted (see Security)
+- `POST /announcement-trading/session/generate`, `GET .../session/generate/status`
+- `GET /announcement-trading/entries?announcement_id=` / `POST /entries` / `POST /entries/{id}/place-order` (manual flow)
+- `POST /announcement-trading/auto/start` / `/auto/stop` / `GET /auto/status`
+- `GET /announcement-trading/activity`, `SSE /announcement-trading/activity/stream`
 
-**Security:** `kite_instances.pkl`'s per-account dict contains plaintext
-`password`/`API SECRET`/`TOTP_KEY` (confirmed by inspection, never printed
-during development). `GET /session-status` returns only an explicit
-allowlist (Zerodha ID, multiplier, margin) — the raw dict and the
-`KiteConnect` instances themselves never leave the backend process. Neither
-`Zerodha_Orders.xlsx` nor `kite_instances.pkl` are read into this repo or
-committed anywhere.
+**Security:** `kite_instances.pkl`'s per-account dict, and
+`Zerodha_Orders.xlsx`, contain plaintext `password`/`API SECRET`/`TOTP_KEY`
+(confirmed by inspecting structure/keys only, never values, during
+development). `session-status` and the login-job status return an explicit
+safe-field allowlist (Zerodha ID, multiplier, margin, per-account
+pending/running/success/failed) — raw credentials and `KiteConnect`
+instances never leave the backend process, and neither file is read into
+this repo or committed anywhere.
+
+**Verified, end-to-end, against live production data** (not synthetic):
+`fetch_new_announcements()` pulled a real BSE filing (JINDALPOLY, "Company
+Update"); `process_item()` ran it through real sentiment (SVM) and category
+(ONNX BERT) models and correctly skipped it as routine news
+(`neutral_or_other`) — a correct decision, not a bug. The live NSE endpoint
+timed out in this same test run without a warmed browser session, exactly
+the dead-cookie-path behavior identified above, not a regression. **Not**
+verified: an actual order placement (deliberately never triggered outside
+the user's own explicit action — this fires real trades).
 
 **Acceptance criteria**
-- A saved trade entry is visible, with its full parameters and outcome, from
-  the announcement that prompted it.
-- Placing an order requires an explicit, separate action from saving —
-  saving parameters never places an order by itself.
-- `place-order` fails clearly (not silently) when no Kite session exists.
-
-**Follow-up (not yet built):** the automatic detection→classification→order
-loop described above, gated behind its own explicit start/stop control
-(matching the legacy app's own START CODE/STOP CODE requirement) and a kill
-switch defaulting OFF, per §0 rule 7.
+- Automatic loop starts/stops only on explicit action; off after every
+  restart.
+- Every processed announcement — traded or not — is visible in the
+  activity feed with its category/sentiment and outcome.
+- Placing an order (manual or automatic) fails clearly, not silently, when
+  no Kite session exists.
 
 ---
 
@@ -495,3 +506,30 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   needs the exact same session. Move it to `app/shared/kite_session.py` next
   time either module's execution path is touched, so both import from one
   place instead of Module C reaching into Module B's internals.
+
+**Decisions made building the automatic loop (Module B, full parity pass):**
+
+- **`transformers` pinned to `<5.0`.** `onnx_bert.py` (reused via clean
+  import for category classification) calls `tokenizer.encode_plus()`,
+  removed in transformers 5.x. Pinning, not patching the legacy file.
+- **`scikit-learn` unpickle version warning, accepted not fixed.** The
+  sentiment SVM/vectorizer were pickled under sklearn 1.0.2; this venv runs
+  1.9.x. Loads and predicts fine (verified against real text), but
+  `InconsistentVersionWarning` is a known sharp edge — if sentiment output
+  ever looks wrong, this pin mismatch is the first thing to check, ideally
+  by re-pickling the model under a matching sklearn version rather than
+  chasing it in code.
+- **`OPENAI_API_KEY` in `Trading_bot/.env` is empty**, not just present —
+  found while testing dependency changes, unrelated to this pass. Means
+  `financial_result_checker.py` (Module A's `financial_result_flag`
+  enrichment) has likely been silently non-functional since Phase 1 — its
+  import raises, `enrichment.py`'s lazy loader catches it and disables
+  enrichment, so Module A itself doesn't break, but the flag never
+  populates. Needs a real key from the user; not something to fix blind.
+- **The PDF re-extraction/re-classification rescue path is not ported** —
+  see Module B's write-up above. Logged per-item, not silent.
+- **TickerPlant merge (`D:\ticker\tp.csv`) is not ported** — optional/
+  best-effort in the original too (wrapped in its own try/except there).
+- **The automatic loop's dedup state is in-memory only**, matching the
+  original's `master_df`/`symbol_store` globals — resets on every restart,
+  not persisted. Same tradeoff already accepted for Module D's job registry.

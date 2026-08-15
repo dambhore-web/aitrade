@@ -1,3 +1,13 @@
+.status-line {
+  color: #666;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
 .banner {
   padding: 0.6rem 0.9rem;
   border-radius: 6px;
@@ -88,6 +98,42 @@
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
+}
+
+.token-section {
+  margin: 0.9rem 0;
+  padding: 0.75rem;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #eee;
+}
+.generate-token-button {
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #12121c;
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.generate-token-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.login-progress {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+}
+.login-status-success {
+  color: #1a7f37;
+}
+.login-status-failed {
+  color: #b3261e;
+}
+.login-status-running,
+.login-status-pending {
+  color: #8a6d00;
 }
 
 .save-button {
@@ -198,6 +244,96 @@
   color: #b3261e;
   font-weight: 600;
 }
+.control-panel {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.start-button,
+.stop-button {
+  padding: 0.5rem 1.3rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #12121c;
+}
+.start-button {
+  background: #22c55e;
+  color: #0b2e17;
+}
+.stop-button {
+  background: #ef4444;
+  color: #2e0b0b;
+}
+.start-button:disabled,
+.stop-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.conn-dot-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #444;
+}
+.conn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.processed-count {
+  font-size: 0.85rem;
+  color: #666;
+}
+.loop-pill {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+.loop-running {
+  background: #d4f0dc;
+  color: #14532d;
+}
+.loop-stopped {
+  background: #eee;
+  color: #555;
+}
+
+.activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+.activity-table th,
+.activity-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-table th {
+  background: #12121c;
+  color: #fff;
+}
+.row-ordered {
+  background: #fffbe0;
+}
+.outcome-ordered {
+  color: #1a7f37;
+  font-weight: 700;
+}
+.outcome-skipped {
+  color: #888;
+}
+
 .place-order-button {
   padding: 0.3rem 0.7rem;
   border-radius: 6px;

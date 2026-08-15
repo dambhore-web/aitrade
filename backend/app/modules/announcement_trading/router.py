@@ -1,9 +1,15 @@
+import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
-from . import db, execution, session
+from . import auto_loop, db, execution, session, session_login
+from .broadcaster import broadcaster
 from .schemas import (
+    ActivityResponse,
+    AutoLoopStatus,
+    LoginJobStatus,
     SessionStatus,
     SettingsOut,
     SettingsUpdate,
@@ -41,6 +47,19 @@ def update_settings(body: SettingsUpdate) -> dict:
 @router.get("/session-status", response_model=SessionStatus)
 def session_status() -> dict:
     return session.get_session_status()
+
+
+@router.post("/session/generate", response_model=LoginJobStatus)
+def generate_session() -> dict:
+    """Real Selenium logins to every account in Zerodha_Orders.xlsx --
+    only ever runs on this explicit call, never automatically."""
+    session_login.start_login_job()
+    return session_login.get_job_status()
+
+
+@router.get("/session/generate/status", response_model=LoginJobStatus)
+def generate_session_status() -> dict:
+    return session_login.get_job_status()
 
 
 @router.get("/entries", response_model=TradeEntriesResponse)
@@ -106,3 +125,54 @@ def place_order(entry_id: int) -> dict:
     )
     any_ok = any("order_id" in r for r in results)
     return db.mark_entry_placed(_conn, entry_id, {"results": results, "current_price": current_price}, "placed" if any_ok else "failed")
+
+
+# ---------------------------------------------------------------------
+# Automatic trading loop -- off by default, matching Kite_API_31.py's own
+# START CODE/STOP CODE requirement (§0 rule 7: nothing trades live until a
+# human explicitly arms it).
+# ---------------------------------------------------------------------
+@router.post("/auto/start", response_model=AutoLoopStatus)
+def start_auto_loop() -> dict:
+    if not session.pkl_path().exists():
+        raise HTTPException(
+            409, "No Kite session -- generate a token first (see Window 1) before starting."
+        )
+    auto_loop.start(_conn)
+    return auto_loop.get_status()
+
+
+@router.post("/auto/stop", response_model=AutoLoopStatus)
+def stop_auto_loop() -> dict:
+    auto_loop.stop()
+    return auto_loop.get_status()
+
+
+@router.get("/auto/status", response_model=AutoLoopStatus)
+def auto_loop_status() -> dict:
+    return auto_loop.get_status()
+
+
+@router.get("/activity", response_model=ActivityResponse)
+def list_activity(limit: int = 100) -> dict:
+    return {"items": db.list_activity(_conn, limit)}
+
+
+@router.get("/activity/stream")
+async def activity_stream(request: Request) -> StreamingResponse:
+    queue = broadcaster.subscribe()
+
+    async def event_gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            broadcaster.unsubscribe(queue)
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")

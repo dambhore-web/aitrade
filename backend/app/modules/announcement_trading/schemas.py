@@ -82,3 +82,42 @@ class TradeEntryOut(BaseModel):
 
 class TradeEntriesResponse(BaseModel):
     entries: list[TradeEntryOut]
+
+
+class ActivityItem(BaseModel):
+    id: int
+    ts_utc: str
+    symbol: Optional[str] = None
+    category: Optional[str] = None
+    sentiment: Optional[str] = None
+    text_snippet: Optional[str] = None
+    skipped: int
+    skip_reason: Optional[str] = None
+    order_placed: int
+    quantity: Optional[int] = None
+    current_price: Optional[float] = None
+    trade_entry_id: Optional[int] = None
+
+
+class ActivityResponse(BaseModel):
+    items: list[ActivityItem]
+
+
+class LoginAccountStatus(BaseModel):
+    status: str
+    message: str
+
+
+class LoginJobStatus(BaseModel):
+    running: bool
+    accounts: dict[str, LoginAccountStatus]
+    error: Optional[str] = None
+
+
+class AutoLoopStatus(BaseModel):
+    running: bool
+    last_cycle_utc: Optional[str] = None
+    last_error: Optional[str] = None
+    state_bse: Optional[int] = None
+    state_nse: Optional[int] = None
+    processed_count: int
