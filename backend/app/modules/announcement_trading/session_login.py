@@ -54,7 +54,7 @@ def get_job_status() -> dict:
 
 
 def _excel_path() -> Path:
-    return get_settings().legacy_root / "Zerodha_Orders.xlsx"
+    return get_settings().legacy_root / "inputs" / "Zerodha_Orders.xlsx"
 
 
 def _geckodriver_path() -> Path:

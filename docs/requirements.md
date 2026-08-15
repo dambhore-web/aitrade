@@ -533,3 +533,13 @@ only way to get a trustworthy "what do I currently hold, and why" view.
 - **The automatic loop's dedup state is in-memory only**, matching the
   original's `master_df`/`symbol_store` globals — resets on every restart,
   not persisted. Same tradeoff already accepted for Module D's job registry.
+- **Bug found on first real Generate Token click:** `Zerodha_Orders.xlsx`
+  actually lives at `Trading_bot/inputs/Zerodha_Orders.xlsx`, not
+  `Trading_bot/Zerodha_Orders.xlsx` (root) as assumed while porting
+  `load_multi_users.py` (which reads it via a bare relative filename,
+  resolved by whatever directory it's launched from — not something to
+  infer from the source alone). Fixed in `session_login.py`. Confirmed via
+  the corrected path: 1 account (NGQ901), file last modified same day as
+  the current `kite_instances.pkl` — genuinely the active file, not a stale
+  copy (two backup copies and one old `~$` Excel lock file also sit in that
+  folder; not the ones in use).
