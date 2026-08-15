@@ -543,3 +543,23 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   the current `kite_instances.pkl` — genuinely the active file, not a stale
   copy (two backup copies and one old `~$` Excel lock file also sit in that
   folder; not the ones in use).
+- **Real incident: a stuck Generate Token attempt froze the entire backend
+  process.** After the path fix, a login attempt left `geckodriver.exe`
+  dead while Firefox stayed running (confirmed via `tasklist`) — Selenium's
+  `RemoteConnection` had no timeout configured, so every subsequent
+  WebDriver command (including inside `driver.quit()` in the `finally`
+  block) blocked forever waiting on a controller that no longer existed.
+  This froze the *whole* process, not just that request — even `GET
+  /health`, which touches nothing, stopped responding, which is what
+  surfaced the Save-button and Generate-Token "stuck, no feedback" reports.
+  Fixed with two independent layers, since the first alone wasn't trusted
+  as sufficient: `driver.command_executor.set_timeout(30)` +
+  `driver.set_page_load_timeout(30)` inside `_fetch_request_token` itself,
+  and a `ThreadPoolExecutor(...).result(timeout=150)` wrapper around each
+  account's login in `_run_job` as a second, independent backstop. Also
+  added a request-level timeout (`AbortController`, 20s) to every frontend
+  API call (`shared/api.ts`) — previously a hung backend meant a button
+  stuck on "Saving..." forever with no way to distinguish "still working"
+  from "broken"; now it surfaces a clear error instead. A frozen backend
+  process itself still requires a manual restart to recover — these fixes
+  prevent the freeze, they don't un-freeze an already-stuck process.

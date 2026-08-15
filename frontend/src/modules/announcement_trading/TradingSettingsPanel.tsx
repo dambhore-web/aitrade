@@ -99,12 +99,29 @@ export default function TradingSettingsPanel() {
               }}
               disabled={generateToken.isPending || loginPolling}
             >
-              {loginPolling ? "Signing in..." : "Generate Token"}
+              {(generateToken.isPending || loginPolling) && <span className="spinner" aria-hidden="true" />}
+              {generateToken.isPending
+                ? "Starting..."
+                : loginPolling
+                  ? "Signing in -- this can take 10-30s per account..."
+                  : "Generate Token"}
             </button>
+            {generateToken.isError && (
+              <p className="banner banner-error">{(generateToken.error as Error).message}</p>
+            )}
+            {loginStatus.isError && loginPolling && (
+              <p className="banner banner-error">
+                Lost contact with the backend while checking progress:{" "}
+                {(loginStatus.error as Error).message}
+              </p>
+            )}
             {loginStatus.data && Object.keys(loginStatus.data.accounts).length > 0 && (
               <ul className="login-progress">
                 {Object.entries(loginStatus.data.accounts).map(([id, acct]) => (
                   <li key={id} className={`login-status-${acct.status}`}>
+                    {(acct.status === "running" || acct.status === "pending") && (
+                      <span className="spinner" aria-hidden="true" />
+                    )}
                     {id}: {acct.status}
                     {acct.message ? ` -- ${acct.message}` : ""}
                   </li>
@@ -195,6 +212,7 @@ export default function TradingSettingsPanel() {
           </div>
 
           <button className="save-button" onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending && <span className="spinner" aria-hidden="true" />}
             {save.isPending ? "Saving..." : "SAVE"}
           </button>
           {save.isSuccess && <span className="save-confirm">Data saved!</span>}

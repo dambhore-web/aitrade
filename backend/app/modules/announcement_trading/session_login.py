@@ -19,6 +19,8 @@ import logging
 import pickle
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Optional
 
@@ -68,13 +70,14 @@ def _fetch_request_token(username: str, password: str, totp_key: str, api_key: s
 
     session = requests.Session()
     resp = session.post(
-        "https://kite.zerodha.com/api/login", data={"user_id": username, "password": password}
+        "https://kite.zerodha.com/api/login", data={"user_id": username, "password": password}, timeout=15
     )
     request_id = resp.json()["data"]["request_id"]
     twofa_pin = pyotp.TOTP(totp_key).now()
     session.post(
         "https://kite.zerodha.com/api/twofa",
         data={"user_id": username, "request_id": request_id, "twofa_value": twofa_pin, "twofa_type": "totp"},
+        timeout=15,
     )
 
     kite = KiteConnect(api_key=api_key)
@@ -84,6 +87,14 @@ def _fetch_request_token(username: str, password: str, totp_key: str, api_key: s
     options.add_argument("--headless")
     service = Service(str(_geckodriver_path()))
     driver = webdriver.Firefox(service=service, options=options)
+    # Without this, a geckodriver that dies mid-session (confirmed to happen --
+    # see docs/requirements.md) leaves every subsequent WebDriver command
+    # blocked forever with no timeout of its own, freezing this thread (and,
+    # per the same finding, the whole process) indefinitely. 30s covers any
+    # single command; _run_job's overall per-account timeout is the second,
+    # independent safety net -- this alone isn't assumed sufficient.
+    driver.command_executor.set_timeout(30)
+    driver.set_page_load_timeout(30)
     try:
         driver.get(kite_url)
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "userid"))).send_keys(username)
@@ -119,20 +130,35 @@ def _run_job() -> None:
             str(row["Zerodha ID"]): {"status": "pending", "message": ""} for _, row in df.iterrows()
         }
 
-    # Step 1: request tokens (Selenium login per account)
+    # Step 1: request tokens (Selenium login per account). Each call has its
+    # own internal timeouts (see _fetch_request_token), but this outer
+    # ThreadPoolExecutor timeout is a second, independent safety net so a
+    # geckodriver that dies mid-session can never hang this job (or, per the
+    # incident that motivated this, the whole backend process) indefinitely
+    # -- confirmed to happen once already without it.
     for index, row in df.iterrows():
         zerodha_id = str(row["Zerodha ID"])
         with _lock:
             _job_state["accounts"][zerodha_id] = {"status": "running", "message": "Logging in..."}
         try:
-            request_token = _fetch_request_token(
-                row["Zerodha ID"], row["password"], row["TOTP_KEY"], row["API KEY"]
-            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    _fetch_request_token, row["Zerodha ID"], row["password"], row["TOTP_KEY"], row["API KEY"]
+                )
+                request_token = future.result(timeout=150)
             if not request_token:
                 raise RuntimeError("No request_token in redirect URL")
             df.at[index, "REQUEST TOKEN"] = request_token
             with _lock:
                 _job_state["accounts"][zerodha_id] = {"status": "running", "message": "Got request token"}
+        except FuturesTimeoutError:
+            logger.error("Login timed out for %s (>150s)", zerodha_id)
+            with _lock:
+                _job_state["accounts"][zerodha_id] = {
+                    "status": "failed",
+                    "message": "Timed out after 150s -- geckodriver/Firefox may be stuck; check for orphaned "
+                    "firefox.exe processes",
+                }
         except Exception as e:
             logger.exception("Login failed for %s", zerodha_id)
             with _lock:
