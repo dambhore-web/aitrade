@@ -11,6 +11,7 @@ class SettingsOut(BaseModel):
     amount: int
     gtt_stop_pct: float
     gtt_target_pct: float
+    market_protection_pct: float
     nse_app_id: str
     nse_it: str
     telegram_enabled: bool
@@ -25,6 +26,7 @@ class SettingsUpdate(BaseModel):
     amount: Optional[int] = None
     gtt_stop_pct: Optional[float] = None
     gtt_target_pct: Optional[float] = None
+    market_protection_pct: Optional[float] = None
     nse_app_id: Optional[str] = None
     nse_it: Optional[str] = None
     telegram_enabled: Optional[bool] = None
@@ -97,10 +99,29 @@ class ActivityItem(BaseModel):
     quantity: Optional[int] = None
     current_price: Optional[float] = None
     trade_entry_id: Optional[int] = None
+    source: Optional[str] = None
+    an_dt: Optional[str] = None
+    attachment_url: Optional[str] = None
 
 
 class ActivityResponse(BaseModel):
     items: list[ActivityItem]
+
+
+class PositionItem(BaseModel):
+    zerodha_id: Optional[str] = None
+    tradingsymbol: Optional[str] = None
+    exchange: Optional[str] = None
+    product: Optional[str] = None
+    quantity: float = 0
+    average_price: float = 0
+    last_price: float = 0
+    pnl: float = 0
+
+
+class PositionsResponse(BaseModel):
+    items: list[PositionItem]
+    total_pnl: float
 
 
 class LoginAccountStatus(BaseModel):
@@ -123,3 +144,11 @@ class AutoLoopStatus(BaseModel):
     processed_count: int
     bse_error: Optional[str] = None
     nse_error: Optional[str] = None
+
+
+class TrueWealthStatus(BaseModel):
+    running: bool
+    authorized: bool
+    last_poll_utc: Optional[str] = None
+    last_error: Optional[str] = None
+    processed_count: int

@@ -685,3 +685,807 @@ only way to get a trustworthy "what do I currently hold, and why" view.
   Selenium attempt is kept as a best-effort background try (now on a long
   cooldown) in case it ever clears on its own; it is not the primary path
   anymore.
+  User pushed back again, correctly: *"GUI input is not used"* — ruling out
+  the Settings-paste theory as *the* mechanism (it's still wired up and
+  correct, just not what was actually relied on). Went back to
+  `Kite_API_31.py` a third time and found a function two earlier passes had
+  missed entirely: `getCookiesFromDomain()`/`get_nse_token()`
+  (~line 2049–2103) — not wired to `nse_data_new()`'s except block, so it
+  never showed up in that trace. It doesn't automate a browser at all: it
+  calls `browser_cookie3.firefox()` and reads `nsit`/`nseappid` straight out
+  of the **local Firefox install's own cookie store on disk**, filtered to
+  the nseindia domain. Real cookies from ordinary human browsing, sitting on
+  the machine already — nothing for Akamai's bot check to ever see, because
+  there's no automated visit for it to detect. `import browser_cookie3` is
+  right there at the top of `Kite_API_31.py`, pinned in
+  `Trading_bot/requirements.txt` as `browser-cookie3==0.19.1` — installed
+  that exact version into the backend venv and added it to
+  `backend/requirements.txt`.
+  Ported as `_get_nse_cookies_from_local_browser()`, tried first in
+  `_maybe_refresh_nse_session()` (no cooldown needed — it's a local disk
+  read, not a network hit) before falling back to the Selenium path, which
+  keeps its 900s cooldown. Matches the original having both mechanisms
+  available; this one just doesn't fight Akamai in the first place. Needs a
+  real Firefox profile on this machine with a recent-enough nseindia.com
+  visit for the cookies to still be live — confirmed importable and running
+  cleanly (returns the `("xx","xx")` no-cookies-found sentinel correctly
+  when none exist), not yet confirmed producing a real nsit/nseappid pair
+  end-to-end — that depends on this machine's actual Firefox cookie state,
+  not on the code.
+  **Resolution, finally found by running the user's own unmodified code
+  directly:** ran `NSE_website_opener.py`'s `get_app_id()` as-is, in the
+  real anaconda3/Selenium 4.8.2 environment — it failed identically
+  (`'nsit'` KeyError). Checked the persisted `global.pickle` `nse_app_id`/
+  `nse_it` the original loads at startup — both empty strings, not stale.
+  User then pasted a real log from their own running `Kite_API_31.py`:
+  `nse_data(cookies)` returned **200 with real live data** while
+  `cookies == {'nsit': 'xx', 'nseappid': 'xx'}` — placeholder garbage.
+  Proof cookies were never the actual gate on this endpoint: the effective
+  `nse_data()` never sends `cookies` as a request parameter at all, it's
+  `session.get(nse_url, ...)` on the shared module-level `requests.Session`,
+  which auto-persists whatever `Set-Cookie` headers the server sends back
+  across the process's lifetime — real Akamai trust cookies accumulate
+  from ordinary successful traffic, independent of `nsit`/`nseappid`.
+  Reproduced the exact original `nse_data()`/`nse_data_new()` logic
+  standalone, looped every 10s: **39/40 cycles succeeded** — only the
+  first (cold session, no headers yet) failed. Ported into `market_data.py`
+  the actual fix: `_maybe_refresh_nse_session()` now resets the session and
+  reapplies `NSE_HEADERS` **unconditionally** on every refresh attempt,
+  even with `nsit`/`nseappid` still `"xx"` — matching `nse_data_new()`'s
+  except block, which does `session.headers.update(set_header())`
+  regardless of whether `get_app_id()` returned real values or its `"xx"`
+  failure sentinel (it never raises). The previous port only reapplied
+  headers on a successful cookie fetch, which never happened against
+  Akamai — so headers, the actual fix, never got attached. Confirmed live
+  in the port too (12/15 cycles) and in the running app (`state_nse: 1`).
+
+- **Activity table enhancements (2026-08-15):** added `source` (NSE/BSE),
+  `an_dt` (announcement time, normalized via `pd.to_datetime` in
+  `merge_bse_nse()` — also fixed a latent bug where the dedup sort was
+  comparing NSE's `"DD-Mon-YYYY"` strings lexicographically), and
+  `attachment_url` (`attchmntFile`, clickable) columns to the activity
+  table, plus a sentiment filter dropdown. `ts_utc` (processed time) and
+  `an_dt` (announced time) now render through one shared 24-hour-clock
+  formatter on the frontend instead of two different formats.
+
+- **Symbol-wise P&L panel (2026-08-15):** ported `Kite_API_31.py`'s
+  `get_open_position_count()` — the function behind the GUI's "Total
+  Profit" column — as a new read-only `GET /announcement-trading/positions`
+  endpoint + `PositionsPanel.tsx` on the Announcement Trading page.
+  `kite.positions()` per account in the shared session, same P&L formula
+  as the original: `(last_price - average_price) * quantity` for open
+  positions (refreshing `last_price` via a live quote first), Kite's own
+  `pnl` field kept as-is for already-squared-off (quantity == 0) legs.
+  **Deliberately does not reproduce a real bug found while tracing the
+  original:** `get_open_position_count()` returns a single DataFrame on
+  its success path, but every caller unpacks it as two values
+  (`all_positions, open_positions_df = get_open_position_count(kite)`),
+  which raises `ValueError: too many values to unpack` on any real
+  position data and gets silently caught by the caller's own `except` —
+  meaning the original's "Total Profit" column likely never actually
+  worked. The P&L formula and `kite.positions()` call are faithfully
+  ported; only the return shape was made internally consistent.
+
+- **Equity auto-trading integration (2026-08-15):** wrapped
+  `new_trade_tool/scanner.py`'s real scan+execute loop (short-only AFL
+  strategy, `LiveExitManager` trailing-stop/time-exit, `execution.py`
+  marketable-LIMIT orders) as a new `equity_auto_trading` module —
+  start/stop-able background thread, runs independently of the
+  Announcement auto-loop (separate thread, separate start/stop). The one
+  deliberate change, per explicit instruction: reuses the Announcement
+  Trading page's shared Kite session (`session.get_kite_instances()`)
+  instead of `scanner.py`'s own separate `auth.py`/`access_token_cache.json`
+  login. `new_trade_tool/collector.py` must still run independently to
+  keep `marketdata.db`'s candles flowing — this loop only reads that DB
+  and places orders, never subscribes to ticks itself, same as the
+  original. `PAPER_TRADING` is read from `new_trade_tool/config.py`
+  unmodified (currently `False` — LIVE); the UI shows `mode` plainly.
+  User started it live during testing; 0 orders placed, 0 open positions
+  at last check.
+
+- **Historical Extractor (Module D) shared session + CSV upload
+  (2026-08-15):** turned out Module D already had almost everything asked
+  for -- NSE/BSE choice, minute-level interval, and `merge_and_save()`
+  (from `zerodha_scrape_core.py`, imported into `zerodha_api_core.py`)
+  already unconditionally dedupes on `[symbol, Date, Time]` on every save
+  regardless of the incremental flag, so "always append, no duplicates"
+  was already true structurally. Two real gaps: (1) it used its own
+  separate `KITE_API_KEY`/`SECRET` OAuth login
+  (`zerodha_api_core.load_cached_session()`), not the shared session --
+  `service.get_kite()` now returns
+  `announcement_trading.session.get_kite_instances()[0][0]` instead, same
+  pattern as `equity_auto_trading`; `login_url()`/`complete_login()` left
+  in place but unused, not deleted. (2) symbols were paste-only, no CSV
+  file input -- added client-side CSV parsing (`parseSymbolsCsv()`,
+  matching `load_symbols_from_file()`'s own column-detection rule:
+  `tradingsymbol`/`symbol` column if present, else first column) feeding
+  the same existing symbol-list submission path; no backend upload
+  endpoint needed. Verified both `auth_status()` and `get_kite()` directly
+  against the live shared session before deploying.
+  Confirmed the other tool referenced ("announcement data extractor")
+  is the Announcement Trading module itself, which already uses the
+  shared session throughout (`market_data.py`'s `_first_kite()`,
+  `execution.py` receiving `kite_instances` injected from
+  `session.get_kite_instances()`) -- no change needed there.
+
+- **Historical Extractor: added an optional download-path input**
+  (2026-08-16) -- `JobCreateRequest.output_dir`, created if missing, job
+  fails cleanly with a clear error if the path can't be created, defaults
+  to `aitrade/data/historical` when left blank. Shown on the job progress
+  view. Verified with a real (read-only) test job.
+
+- **Real timezone bug found and fixed in `zerodha_api_core.py`
+  (2026-08-16):** user reported downloaded minute candles timestamped
+  03:45-09:59 instead of the actual 09:15-15:30 IST market hours -- a
+  suspiciously exact -5:30 shift. Root cause, in
+  `fetch_symbol_history_for_ranges()`:
+  `pd.to_datetime(part["date"], utc=True).dt.tz_localize(None)`.
+  `kite.historical_data()` already returns each candle's timestamp with
+  IST's `+05:30` offset baked in; `utc=True` was converting those to UTC
+  (shifting every candle back 5:30) *before* `tz_localize(None)` stripped
+  the timezone marker, silently mislabeling the UTC-shifted time as if it
+  were still IST -- a 09:15 IST candle came out stamped 03:45. Fixed by
+  dropping `utc=True` (parses preserving the original +05:30 offset;
+  `tz_localize(None)` then only drops the marker, keeping the correct
+  wall-clock value). Verified directly: reproduced the exact 03:45 with
+  the old code, confirmed 09:15 with the fix, using a synthetic
+  Kite-shaped tz-aware datetime for market open. This is a genuine bug in
+  the legacy file itself (edited in place, not a porting deviation) --
+  `zerodha_scrape_core.py`'s equivalent path never had it (`utc=True` was
+  never passed there). **Any minute/intraday CSVs downloaded through
+  Module D before this fix have the wrong (shifted) times baked in and
+  should be re-downloaded** -- day-interval data is unaffected (only the
+  date matters there, and the shift doesn't cross a day boundary for
+  market-hours timestamps).
+
+- **"Ends at 3:14 PM instead of 3:30 PM" -- root-caused, NOT a bug in our
+  code (2026-08-16):** user pushed back hard on an earlier "Kite API
+  limitation" claim, pointing at manual Zerodha-UI observation (correct
+  15:29 last candle) and at a personal Jupyter notebook
+  (`Historical_data_download.ipynb`) that had apparently downloaded full
+  days before. Investigated the notebook first: neither of its two
+  captured cell runs (official `kite.historical_data()` w/ `oi=True` +
+  datetime objects, and the unofficial scrape endpoint) actually
+  succeeded in their saved output -- one was interrupted at the login
+  prompt before any fetch, the other 403'd on every symbol (different,
+  unrelated `user_id=XE4670`). But real CSVs already sitting on disk from
+  past successful runs (`.../PythonExperient/intrday_day_data/*.csv`)
+  proved a full day *had* been downloaded before: `360ONE.csv` has a
+  clean 09:15:00-15:29:00 run for 2026-02-20.
+  Ran a live A/B/C/D test against the same shared Kite session, isolating
+  every difference between the notebook's successful call and our
+  code's (datetime objects vs pre-formatted strings, `oi=True` vs
+  unset) -- all four variants returned an identical 360 candles cut off
+  at 15:14 for 2026-08-14. Neither factor was the cause.
+  Then tested the same symbol across a range of calendar days instead:
+  clean split at the July/August boundary -- every trading day from
+  2026-08-03 through 2026-08-14 (today's live query) returns exactly 360
+  candles (09:15-15:14), while every day on or before 2026-07-31 returns
+  the full 375 (09:15-15:29), including 2026-07-17, which is the exact
+  date the user originally pasted truncated data for and which *now*
+  comes back complete.
+  **Conclusion: Kite's official historical-data warehouse has a backfill
+  lag of roughly 2-3 weeks for intraday minute candles.** The most recent
+  trading days are provisionally missing their last ~15 minutes of
+  candles when queried too soon after the fact; Kite fills them in later.
+  This explains every observation: our downloads of recent days were
+  genuinely (if temporarily) incomplete; the live Zerodha UI is
+  unaffected because it isn't reading from this same historical
+  warehouse; and the user's own notebook run from February looked
+  complete because months had passed since. Not a porting bug, not
+  something fixable client-side -- Kite's own data isn't final yet at
+  fetch time for very recent days. Practical mitigation for Module D:
+  re-running an incremental download after a few weeks will pick up the
+  now-backfilled candles for any previously "short" recent day, since
+  `existing_coverage()` + `compute_missing_ranges()` only skip days
+  that are *already* present, and a short day still gets its Date logged
+  as covered -- so a true incremental re-fetch won't currently detect a
+  short day as incomplete and re-pull it. Flagged to the user as a real
+  gap worth a following change (detect and re-pull partial-day coverage,
+  not just missing days) if this matters for their use case, rather than
+  silently changed.
+
+- **Short-day re-fetch + a second real bug found while testing it
+  (2026-08-16):** implemented the mitigation from the entry above --
+  `zerodha_scrape_core.find_short_recent_days()` checks the last 25
+  days of an already-downloaded symbol's CSV and flags any day whose
+  last saved candle falls short of the interval's expected
+  session-close candle (with a small tolerance so genuine half-day
+  sessions aren't misflagged); wired into both `download_symbol()`
+  implementations (`zerodha_scrape_core.py`'s own, and
+  `zerodha_api_core.py`'s, which is the one the live platform actually
+  calls) so an incremental re-run folds any short recent day back into
+  the fetch range alongside genuinely missing dates. Bounded to 25 days
+  so a real short session (e.g. Muhurat trading) only gets harmlessly
+  re-checked for a few weeks, then ages out and is left alone.
+  While building an end-to-end test for this (seed a CSV with an
+  artificially short day, run `download_symbol()`, confirm it comes
+  back complete), found a second, independent, pre-existing bug in
+  `merge_and_save()`: a freshly-fetched batch has real `datetime.time`
+  objects in its `Time` column, but a batch just read back from an
+  already-saved CSV has plain strings (CSV has no time dtype). Left
+  unnormalized, concatenating the two produces a mixed-type column
+  where e.g. `"09:15:00"` and `datetime.time(9, 15)` never compare
+  equal, so `drop_duplicates()` silently missed every genuine duplicate
+  on a date that already existed in the file -- directly breaking the
+  user's original "no duplicates in the file" requirement for any
+  incremental run that overlapped an already-saved date (which is
+  exactly what the short-day fix above does on purpose). Reproduced in
+  isolation (dtype mismatch confirmed, `duplicated()` returning
+  `False` where it should return `True`), fixed by normalizing `Time`
+  the same way `Date` already was
+  (`pd.to_datetime(combined["Time"].astype(str), format="%H:%M:%S").dt.time`)
+  before the dedup call. Verified both fixes together end-to-end
+  against the live shared session: seeded a real symbol's CSV with an
+  artificially short day, ran the real `download_symbol()`, confirmed
+  it detected the short day, re-fetched it, and the file ended up with
+  exactly 375 candles (09:15-15:29) and zero duplicate rows.
+
+- **News Extractor (new module) -- historical NSE/BSE announcement
+  download + sentiment/BERT classification (2026-08-16):** modeled on
+  `nse_bse_extraction_tool.py`, a 1,528-line PySide6 desktop app
+  ("Trading Data Analyzer") found in `Trading_bot/`. Per explicit
+  instruction this is a **separate, from-scratch file**
+  (`Trading_bot/nse_bse_tool_extraction.py`), not an edit to or import of
+  the existing one -- that file can't be safely imported as a library: it
+  unconditionally runs a live Zerodha login (Selenium + TOTP, writing
+  fresh request tokens back to `Zerodha_Orders.xlsx`) at module scope just
+  from being imported, and importing it at all requires `swifter` and
+  PySide6 installed, neither needed here. It is untouched.
+  Two things were found and disclosed before building: (1) the
+  module-level auto-login described above; (2) the tool's `pred_bertv0.4`
+  column, despite its name, was never real BERT -- `main()` calls its
+  sklearn/TF-IDF `predict_category()` twice (once for `preds`/"category",
+  again in a thread pool for `pred_bertv0.4`), while the file's own real
+  `bert_predictor()`/`Bert_classification()` (a genuine
+  `BertForSequenceClassification` load) is defined but never called.
+  Asked how to handle this; told to match `Kite_API_31.py`'s BERT logic
+  instead. Read that file: its live category classification
+  (`calculate_row_values_in_parallel()`, `check_category_again_from_pdf()`)
+  calls `predict_with_onnx()` from `onnx_bert.py` (an ONNX-accelerated
+  real BERT model, `dev/Model_BERT/v0.4/onnx/bert_model.onnx`, verified
+  present on disk, 438MB) -- not the pytorch `Bert_classification` either
+  (also imported but unused there). Sentiment (`analyseText`/`cleanText`/
+  `redact_with_spacy`, same `model/sentiment/svm.pickle` +
+  `vectorizer.pickle`) is identical between both source files and ported
+  as-is, including a quirky retry-order detail kept deliberately unfixed
+  (see `analyse_sentiment()`'s docstring: on a non-positive first pass it
+  cleans the raw text *then* redacts ORGs from the already-cleaned text,
+  backwards from what would help spaCy's NER -- exactly what both source
+  files do).
+  The new file's `run_extraction()` therefore computes a single, real,
+  BERT-backed `category` column (not two columns that were supposed to be
+  different models but, in the original, silently computed the same one
+  twice) -- disclosed to the user as an intentional UI deviation from strict
+  1:1 column-for-column fidelity, everything else (BSE pagination, NSE
+  date-range query, the BSE<->Zerodha symbol merge, the two market/sentiment
+  filters, the 10-minutes-after-announcement price-reaction formulas)
+  ported faithfully. BSE symbol mapping uses
+  `reference_data.symbol_list()` (the platform's one already-maintained
+  SCRIP_CD->SYMBOL map) instead of the original's separate, static
+  `instruments(14).csv`, to avoid a second copy of the same data going
+  stale independently. `append_bonus_buyback()` (writes to
+  `inputs/bonus_buy_back.csv`, the schema `Kite_API_31.py`'s live trading
+  GUI reads via `check_symbol_and_pred_bert_existence()` -- distinct from
+  the newer `inputs/bonus_buyback.csv` the announcement-trading auto-loop
+  uses) is kept as an explicit, separately-called opt-in step, never
+  invoked automatically, since it writes to a file another live tool
+  depends on.
+  Backend: `app/modules/news_extractor/` -- same shared Kite session
+  (`announcement_trading.session.get_kite_instances()`) and the same
+  already-proven NSE cookie handling (`announcement_trading.market_data`)
+  as every other module; async job pattern copied from Module D's
+  `jobs.py` (`POST /jobs` returns immediately, `GET /jobs/{id}` polled by
+  the frontend) since a full run -- BSE pagination across the date range,
+  one NSE call, a Kite historical-data call per surviving row, then BERT
+  inference per row -- comfortably exceeds the frontend's 20s request
+  timeout.
+  Frontend: `modules/news_extractor/` -- deliberately kept the original
+  desktop app's own light-gray/blue palette (`#ecf0f1`/`#3498db`, 8px
+  rounded corners) scoped to this page only, rather than the rest of
+  aitrade's dark/yellow theme, since "exact UI" was the explicit ask.
+  Dropped the "Script Folder Path" field (meaningless server-side -- the
+  backend already knows where `Trading_bot/` is) and the "Close" button
+  (a desktop-window concept); kept Start/End Date, all three checkboxes
+  (Remove Negative Sentiment / Remove After Market / Run Zerodha Analysis,
+  same defaults, all checked), Run Analysis / Refresh Table, the progress
+  bar, the timestamped log panel, the status line, and the results table.
+  Verified end-to-end against live BSE/NSE/Kite data through the actual
+  FastAPI router layer (not just the pipeline functions directly): a real
+  day's run returned 5,049 merged BSE+NSE rows, 102 after the sentiment
+  filter, 17 after the market-hours filter, 7 after the symbol-exists
+  filter, each with real Kite price-reaction numbers and real BERT
+  categories (`approval`, `LOA`, `new order`, `partnership`, `mou`) --
+  genuinely different classifications per announcement, not the
+  ever-present-in-`nse_bse_extraction_tool.py` "same value twice" bug.
+
+- **Bonus/Buyback Download (new module) + a real cache-staleness bug found
+  while verifying the exclusion gate (2026-08-16):** user asked for
+  Kite_API_31.py's "Get Bonus/Buy Back Data" feature as its own page, and
+  to verify the exclusion logic it feeds (so already-seen bonus/buyback
+  news doesn't trigger a repeat order) actually works.
+  Traced the real call chain first: Kite_API_31.py's button calls
+  `run_main_with_bonus_append()` from **`bonus_buyback_extract.py`** --
+  confirmed via `from bonus_buyback_extract import run_main_with_bonus_append`
+  -- not the near-identical copy of that function embedded in
+  `nse_bse_extraction_tool.py` (used as the model for News Extractor's own
+  `append_bonus_buyback()`, added 2026-08-16 earlier the same day). This
+  mattered: `bonus_buyback_extract.py` writes to
+  **`inputs/bonus_buyback.csv`** (no underscore), while
+  `nse_bse_extraction_tool.py`'s copy writes to the separate, unrelated
+  `inputs/bonus_buy_back.csv` (underscore) -- and `bonus_buyback.csv` (no
+  underscore) is the exact file `Kite_API_31.py`'s
+  `check_symbol_and_pred_bert_existence()` reads, and the exact file the
+  already-ported `announcement_trading.gates.already_processed()` /
+  `reference_data.bonus_buyback_list()` already read too. News Extractor's
+  `append_bonus_buyback()` (in `Trading_bot/nse_bse_tool_extraction.py`,
+  shared by both new pages) was pointed at the wrong file -- fixed to
+  target `bonus_buyback.csv`, matching the authoritative source.
+  Confirmed `bonus_buyback_extract.py`'s `main()` already calls
+  `predict_with_onnx` (real BERT) for category, not the sklearn stand-in
+  (that call is commented out there) -- same conclusion independently
+  reached for News Extractor, now doubly confirmed against the actual
+  live source.
+  New page: `app/modules/bonus_buyback/` -- same `run_extraction()` +
+  `append_bonus_buyback()` from `nse_bse_tool_extraction.py`
+  (`compute_price_reaction=False`, not needed for a corporate-action
+  catalog), run as its main action (fetch -> classify -> append is one
+  button, matching the original's own behavior -- not opt-in the way
+  News Extractor's bonus-append button is, since here that append *is*
+  the tool's whole purpose). Also shows the current
+  `bonus_buyback.csv` contents directly so the exclusion list itself is
+  visible, not just inferred.
+  While verifying the gate end-to-end (not just each half in isolation):
+  ran a real 7-day extraction, got a genuine new `bo_stock_split` row
+  (BANSALWIRE) appended to `bonus_buyback.csv`, then called
+  `gates.already_processed()` directly -- **it returned False**, i.e. the
+  row that had just been written was invisible to the live gate.
+  Root cause: `reference_data.bonus_buyback_list()` loads the CSV once and
+  caches it in memory for the life of the process, same pattern as this
+  module's other reference tables (which is fine for those -- they're
+  genuinely static). But this file is no longer read-only: the new Bonus/
+  Buyback Download page writes to it from the *same* long-lived backend
+  process the auto-loop's gate runs in, so the cache goes stale the
+  instant a new row is appended and stays stale until a process restart
+  -- silently letting through orders for symbols that should now be
+  excluded. Fixed by re-reading the file whenever its mtime changes
+  (`bonus_buyback_list()` now stats the file on every call -- cheap --
+  instead of caching forever); the other reference tables are left as
+  plain load-once caches since nothing writes to them at runtime.
+  Verified the fix directly: appended a row to the CSV from outside the
+  cached function, confirmed the very next call picked it up without a
+  restart; then re-ran `gates.already_processed('BANSALWIRE',
+  'bo_stock_split')` against the real row appended earlier and got
+  `True`, with an unrelated symbol correctly still returning `False`.
+  This is the kind of gap "check if the logic is working" was specifically
+  asking about -- both halves worked correctly in isolation; only the
+  interaction between two features running in the same process, verified
+  together rather than separately, exposed it.
+- **`new_trade_tool` collector/WS resilience fixes (2026-08-17):** two
+  gaps found while diagnosing "equity trading generated only one alert
+  since market open" traced back to real, recurring gaps in
+  `marketdata.db` (confirmed via MMTC/PRESTIGE: clusters of 4-5
+  consecutive near-zero-volume candles, ~73% of symbols unaffected in the
+  same windows -- ruled out a full WS outage). Root cause: `ws_runner.py`
+  sent `subscribe()`/`set_mode()` as one 534-token batch, silently
+  dropping a subset; and a mid-session gap, once it happened, was never
+  self-healed (`backfill()` only ran once at startup). Fixed both:
+  `ws_runner.py` now chunks subscribe/set_mode (`SUBSCRIBE_CHUNK_SIZE=150`,
+  0.25s between chunks) and `run_forever()`'s `on_noreconnect` now
+  actually rebuilds the connection instead of returning and idling
+  forever; `collector.py` gained `periodic_backfill_loop()` re-running
+  `backfill()` every 20 min during market hours. Verified live: "WS
+  subscribed 512 tokens in 4 chunks of <=150", 170-190 ticks/sec
+  sustained, zero lock errors.
+- **`db.py` missing `busy_timeout` (2026-08-17):** found while restarting
+  `collector.py` -- the startup backfill (single-threaded, single
+  connection, no internal race) still failed "database is locked" on
+  nearly every symbol. Root cause turned out to be a second process:
+  `equity_trading/service.py` and `equity_auto_trading/scanner_loop.py`
+  both read/write this *exact* `new_trade_tool/marketdata.db` file (not a
+  separate copy), and aitrade's Equity Auto Trading loop cycles every
+  1-2s, winning most write races against `collector.py`'s slower,
+  sequential catch-up. `db_connect()` had no `PRAGMA busy_timeout`, so any
+  collision failed instantly instead of waiting briefly. Added
+  `busy_timeout=5000`. Doesn't eliminate contention when both sides write
+  at similar frequency, but turns instant failures into short waits;
+  non-fatal either way since `collector.py`'s startup backfill already
+  tolerates per-symbol failures and self-heals via the periodic-backfill
+  fix above.
+- **Shared Kite session for `new_trade_tool`'s standalone scripts
+  (2026-08-17):** user wanted to run `new_trade_tool/main.py` (the
+  monolithic collector+strategy+execution script, live order placement
+  on) standalone in parallel with aitrade's own Equity Auto Trading, to
+  compare signal generation -- explicitly approved running both live,
+  same account ("I don't have money in account"). Running `main.py`'s own
+  `auto_login()` (independent Selenium+TOTP login) risked invalidating
+  aitrade's already-active session, since Kite generally allows one active
+  access token per API key. Added `auth.load_shared_platform_session()`
+  -- reads `Trading_bot/kite_instances.pkl` directly (same file
+  `announcement_trading.session.get_kite_instances()` reads), returns
+  `(kite, access_token)` matching `auto_login()`'s signature. Wired into
+  both `main.py` and `collector.py`'s entry points. Running
+  `collector.py` and `main.py` together is redundant (`main.py` already
+  does its own WS collection + backfill on top of strategy/execution), so
+  `collector.py` was stopped once `main.py` was confirmed running instead.
+- **Announcement Trading orders silently failing all day (2026-08-17):**
+  user reported "No order placed why?" for an announcement whose
+  `activity_log` row showed `skipped=0` (passed every gate) but
+  `order_placed=0` -- not a gating bug. Backend log showed the real cause:
+  `execution.py`'s `place_orders()` (faithful port of `Kite_API_31.py`)
+  calls `kite.place_order(..., market_protection=-1.0)`, but the
+  installed `kiteconnect==5.0.1` had dropped `market_protection` from
+  `place_order()`'s signature entirely -- every single order attempt that
+  day failed with `TypeError: unexpected keyword argument
+  'market_protection'`, caught and logged, so the pipeline believed it
+  had "tried." Confirmed `market_protection` is required, not optional --
+  Zerodha rejects plain MARKET orders via the API without it (already
+  documented in `new_trade_tool/execution.py`'s own comment, which is why
+  Equity Trading's orders use a marketable LIMIT-order workaround
+  instead). Root cause fixed at the actual source instead of working
+  around it in this file: `kiteconnect` upgraded 5.0.1 -> 5.2.1 (confirmed
+  via the downloaded wheel's source that 5.2.1's `place_order()` restores
+  `market_protection`, same `-1`-means-automatic-protection semantics) --
+  `execution.py` needed no behavior change, matching the original port
+  exactly. Verified end-to-end with a real 1-share live order (user-run,
+  not run by the assistant -- placing trades directly is out of scope
+  regardless of authorization) via a small standalone script,
+  `new_trade_tool/test_order_placement.py`; order placed successfully.
+- **`LiveExitManager` position tracking is in-memory-only (2026-08-17):**
+  found while restarting the aitrade backend for the fix above --
+  discovered `equity_auto_trading/scanner_loop.py`'s `exit_mgr.pos` (the
+  trailing-stop state for open shorts) is a plain in-process dict, never
+  persisted, and unlike Announcement Trading's entries, equity positions
+  get no broker-side GTT bracket either. A backend restart with a real
+  open position (PDSL, short 1, MIS) left it open at Zerodha but with zero
+  active stop-loss management until MIS auto-square-off near close --
+  user accepted this once ("Restart now as-is", stakes were ~Rs 370) but
+  asked for the underlying gap fixed. Added
+  `LiveExitManager.reconcile_open_positions(exchange, symbols)`: seeds
+  `self.pos` from `kite.positions()` on startup, restricted to
+  short/negative-quantity positions matching this manager's own
+  product/exchange and the equity watchlist -- a position opened by
+  another tool/strategy on the same shared account (e.g. `main.py`,
+  running in parallel per the entry above) is deliberately left
+  untouched, not swept in. Wired into both `scanner_loop.py` and
+  `main.py` (both create their own `LiveExitManager`), gated on `not
+  PAPER_TRADING`. Verified via a mocked-`kite.positions()` unit test
+  (PDSL itself was already flat again by restart time, so nothing live to
+  reconcile against) -- confirmed it seeds the matching short correctly
+  and skips wrong-watchlist, wrong-product, and long positions.
+- **`strategies.py` `Ref(Short_condition,-1)` shift applied then reverted
+  (2026-08-17):** in response to "Equity trading seems to be not firing
+  orders sine morning only one order" (one signal all day, PDSL at
+  11:15), applied a fix diagnosed earlier the same session but never
+  confirmed: AmiBroker's AFL computes `Short_raw = Ref(Short_condition,-1)
+  AND ...` (previous-bar lag), but the ported code evaluated
+  `Short_condition` unshifted -- confirmed via an 18-symbol entry-timing
+  comparison against real AmiBroker output. Applied the shift
+  (`d.groupby("date")["Short_condition"].shift(1)`) at all three
+  `Short_raw` call sites, including the one `scanner.py`'s live path
+  uses, restarted both `main.py` and the aitrade backend (no open
+  equity-side positions on either restart, so nothing at risk). **User
+  reverted this immediately: "i didn't want the signal shift fix. it was
+  working fine."** Reverted all three sites back to the unshifted
+  version exactly as they were (the shifted version is AFL-literal and
+  well-evidenced by the AmiBroker comparison, but the user's live
+  experience overrides that -- do not reapply without asking again). The
+  `vwap_start` default fix (91500 -> 93000, applied in the same pass) was
+  *not* called out as unwanted and was left in place.
+- **Announcement Trading exit rules were never ported at all (2026-08-17):**
+  user reported "exit rules are not getting forced." Traced to a whole
+  missing subsystem, not a bug in an existing one: `auto_loop.py`
+  (replacing `Kite_API_31.py`'s `the_thread()/job()`) only ever calls
+  `pipeline.process_item()` -- the entry side (gates -> place order -> one
+  static GTT OCO bracket). The original's `remove_orders()` and
+  `remove_orders_before_mkt_close()` (submitted via `ThreadPoolExecutor`
+  every job() tick whenever `num_open_positions > 0`) manage the position
+  from there on: a trailing stop-loss that only ever tightens
+  (`modify_gtt`, allowance narrowing from +0.4% in the first 2 min to
+  `stop_pct - 0.2%` past 4 min via `calculate_factor()`), three forced-exit
+  triggers (red P&L held >2min, hard 10-min time-stop regardless of P&L,
+  P&L% < -1%), a 15:28-15:30 EOD forced-exit window, a re-place-if-
+  triggered-but-still-open safety net, and a separate unconditional EOD
+  square-off. None of this existed in the port -- a position got its
+  static bracket at entry and was never revisited.
+  Ported faithfully as `exit_management.py` (`run_cycle()`, called from
+  `auto_loop.py`'s existing poll loop, gated per-account on
+  `kite.positions()` actually returning something open). Needed the
+  original's `stoploss_df_temp` (in-memory high-price-since-entry tracker,
+  keyed here by `(zerodha_id, symbol)`, same restart-loses-the-ratchet
+  characteristic as the original -- the broker-side GTT itself is
+  unaffected, only how much tighter to trail it from here is reset) and a
+  way to recover each position's original stop_loss_pct/absolute
+  stop-target prices and per-account `gtt_trigger_id` -- added two new
+  `trade_entries` columns (`stop_loss_price`, `target_price`; the
+  pre-existing `stop_loss_pct`/`target_pct` were declared but never
+  actually populated by the auto-loop's entry-creation call, only by the
+  separate manual-draft flow in `router.py` -- fixed to populate all four,
+  back-derived from `result.trigger_price`/`target_price` at creation
+  time) and read the existing `order_result` JSON (already has
+  `gtt_trigger_id` per account from `execution.place_orders_parallel()`)
+  instead of adding new tracking for that.
+  Verified with a dry run first: `_manage_position()` called directly
+  against ASALCBR's real open position (from an earlier live order this
+  same session) with a mocked `kite` that only records calls -- correctly
+  decided a forced exit (already past the 10-min time-stop) and produced
+  the exact `place_order` payload expected, no exceptions. User confirmed
+  going live knowing this would immediately fire for real. It did,
+  correctly, on the first cycle after restart: forced-exit LIMIT SELL
+  placed for ASALCBR (held 38.8 min), then the GTT trailed on the next
+  cycle since the SELL was still `OPEN` (not yet filled) -- confirmed this
+  matches the original's own behavior (it doesn't gate the trailing step
+  on a pending exit order either, so this isn't a new bug introduced by
+  the port).
+- **Navigation/UI redesign, Phase 1 (2026-08-17):** user asked for a PM-style
+  UX audit + redesign proposal, not immediate code changes -- built and
+  published a proposal artifact (nav IA diagram, working sidebar/dashboard
+  mockup, visual token system, 3-phase rollout) before touching any code,
+  per "first suggest the changes." User approved: sidebar nav, start
+  Phase 1. Phase 1 scope (low risk -- purely additive, no existing page's
+  internals touched): `shared/theme.css` (design tokens: ink/accent/live/
+  paper/stopped/danger, light+dark), `shared/StatusBadge.tsx`,
+  `shared/useTradingStatus.ts` (thin hooks over the existing
+  `/announcement-trading/auto/status`, `/announcement-trading/positions`,
+  `/equity-auto-trading/status`, `/equity-auto-trading/signals`
+  endpoints -- no new backend work), `shared/Sidebar.tsx` (replaces the
+  flat topbar with Trading/Tools grouping + live status dots per item),
+  and `modules/dashboard/DashboardPage.tsx` (replaces the old home page's
+  bare link list with a risk strip -- loops running, open positions,
+  today's P&L, errors -- plus per-module status cards). `App.tsx`/`App.css`
+  updated for the new sidebar-grid shell; every existing `<Route>` and
+  module page left untouched. Verified: `tsc -b --noEmit` and
+  `npm run build` both clean, then visually confirmed in-browser (Dashboard,
+  Equity Trading, Announcement Trading all render correctly with real
+  live data -- the "Window 1/Window 2" legacy naming on Announcement
+  Trading is still there as expected, since renaming/restructuring
+  individual pages is Phase 2, not started).
+- **Navigation/UI redesign, Phase 2 (2026-08-17):** restructured the two
+  live-trading pages per the approved proposal.
+  Announcement Trading (`AnnouncementTradingPage.tsx`): reordered to
+  Status & Control -> Positions & P&L -> Session & Settings (unchanged
+  `TradingSettingsPanel`, already collapsed by default), dropped the
+  legacy "Window 1"/"Window 2" labels from the PySimpleGUI desktop app.
+  Equity Trading (`EquityTradingPage.tsx`): split into two tabs -- Live
+  Auto-Trading (control + signals + a **new** Positions & P&L panel) and
+  Symbol Explorer (the existing chart/signal-marker/symbol-picker view,
+  unchanged). Both tab contents stay mounted and are toggled via CSS
+  `display`, not conditional rendering, so the chart's one-time
+  lightweight-charts setup effect never has to re-run on tab switch.
+  The new equity positions panel needed a backend addition -- Equity Auto
+  Trading's `/status` only ever exposed a bare `open_positions` count, no
+  per-symbol detail (unlike Announcement Trading's own
+  `/announcement-trading/positions`). Added
+  `GET /equity-auto-trading/positions` (`equity_auto_trading/router.py` +
+  `schemas.py`): reads `kite.positions()` directly across the shared
+  session's accounts, filtered the same way
+  `LiveExitManager.reconcile_open_positions()` already decides what it's
+  willing to manage (this strategy's own product from `new_trade_tool/
+  config.py`, short/quantity<0 only) -- deliberately *not* filtered to the
+  current watchlist like the reconciler is, so a position that fell off
+  the watchlist between restarts still shows up here instead of being
+  silently hidden.
+  Found and fixed a real, pre-existing, unrelated bug while verifying this
+  in-browser: `GET /equity/status` 500'd with `UnicodeEncodeError`.
+  `new_trade_tool/common.py`'s `log()` does a plain `print()` including
+  emoji ("✅ Loaded ... symbols"); when the aitrade backend's stdout is
+  redirected to a file (true for every backgrounded run this session) and
+  not reconfigured, Windows Python defaults to cp1252 instead of UTF-8 and
+  raises on the first such call. `new_trade_tool/main.py` already carries
+  this exact fix at its own entry point; added the same
+  `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` (+ stderr)
+  to `aitrade/backend/app/main.py`'s top, since it's a separate process/
+  entry point that never had it.
+  Verified: `tsc -b`/`npm run build` clean; live in-browser via
+  `get_page_text` (screenshot capture was unreliable against the
+  canvas-based candlestick chart specifically -- a CDP/tooling quirk, not
+  an app bug, confirmed by the page rendering correctly both ways) --
+  Announcement Trading's new section order and Equity Trading's tab split
+  (including the new, correctly-empty positions panel) both confirmed
+  working with real backend data.
+- **Navigation/UI redesign, Phase 3 (2026-08-17):** consolidated the
+  duplicated CSS the earlier phases left behind and finished the shared
+  component migration.
+  New `shared/components.css` (imported once in `App.tsx`, alongside
+  `theme.css`): spinner, `.status-line`, `.table-scroll`, `.banner*`,
+  `.positions-panel`/`.pnl-*`, `.control-panel`, `.start-button`/
+  `.stop-button`, `.session-pill`, and the base `.activity-table`/
+  `.entries-table`/`.signals-table` styling -- all previously copy-pasted
+  near-verbatim between `trading.css` and `equity.css` (and partly
+  reinvented in `historical.css`), now defined once on the token set.
+  Each module's own CSS file kept only what's genuinely page-specific.
+  `.loop-pill`/`.mode-pill` (trading.css/equity.css) retired entirely in
+  favor of the shared `StatusBadge` component from Phase 1 -- these were
+  literally reimplementing the same live/paper/stopped concept with their
+  own hardcoded colors; `AutoLoopControl.tsx` and
+  `EquityAutoLoopControl.tsx` now render `<StatusBadge>` instead. Also
+  fixed `AutoLoopControl.tsx`'s `ConnectionDot` (BSE/NSE indicator) to use
+  `var(--live)`/`var(--danger)`/`var(--stopped)` instead of its own
+  separate hardcoded hex triplet.
+  Full token migration (hardcoded hex -> `var(--token)`) on
+  `trading.css`, `equity.css`, `historical.css`, `bonus_buyback.css` --
+  all four already shared the same literal palette (`#12121c` ink,
+  `#ffe600` legacy yellow brand -> now `var(--accent)`, `#1a7f37`/
+  `#b3261e`/`#8a6d00` success/danger/warning, etc.), so this was a
+  mechanical, low-risk substitution. `news_extractor.css` got a lighter
+  touch -- only its two semantic status colors (success/danger) moved to
+  tokens; its own distinct "flat UI" palette (blue/navy/grey, unrelated to
+  the rest of the app) was left alone rather than forcing an unrelated
+  page's visual identity into this pass without a closer audit.
+  Verified: `tsc -b`/`npm run build` clean; visually confirmed in-browser
+  (Dashboard, Announcement Trading, Equity Trading, Historical Data) --
+  StatusBadge renders identically in the sidebar and inside each page's
+  own control panel now (same component, same tokens), START/STOP buttons
+  read as a more restrained green/red than the original bright
+  `#22c55e`/`#ef4444`, consistent with the rest of the redesign's palette.
+  This closes out all three phases of the nav/UI redesign proposed and
+  approved earlier the same session.
+- **Manual Trade Entry form was documented but never actually built
+  (2026-08-17):** user asked why Announcement Trading's UI had no entry
+  form (Order Variety, Order Type, Market type, GTT parameters, Amount).
+  Not something removed during the nav redesign -- confirmed by grep that
+  no `.tsx` component for it had ever existed, despite `docs/
+  requirements.md` §6 Module B always documenting it ("the manual
+  per-announcement flow, still available on the Announcements page"),
+  the backend endpoints being fully built (`GET/POST
+  /announcement-trading/entries`, `POST .../entries/{id}/place-order`),
+  the `TradeEntryCreate`/`TradeEntry` types already in `types.ts`, and even
+  `trading.css`'s `.trade-panel`/`.trade-form`/`.entries-table` classes
+  already sitting there unused.
+  Built `TradeEntryPanel.tsx`, reusing the exact same variety (regular/co/
+  bo), order_type (MARKET/SL-M/LIMIT), and product_type (MTF/MIS/CNC)
+  option sets `TradingSettingsPanel` already uses, for consistency. Two-
+  step by design, matching the backend: `POST /entries` only ever saves a
+  draft (Symbol, Exchange, Transaction, Amount-or-Quantity, optional
+  per-trade GTT stop/target %, and optional variety/order_type/
+  product_type overrides -- left blank, they fall back to Session &
+  Settings' global values at place-order time, so the form defaults to
+  "(Settings default)" rather than silently duplicating whatever the
+  global settings currently are and drifting from them later). Placing an
+  order is a separate, explicit button per draft row, gated behind
+  `window.confirm(...)` naming the symbol/side and stating it's a real
+  order -- same pattern as the existing "Generate Token" confirm.
+  Wired into `AnnouncementTradingPage.tsx` between Positions & P&L and
+  Session & Settings.
+  Verified live: the panel correctly rendered *existing* real
+  `trade_entries` rows (ASALCBR/THYROCARE placed by the auto-loop earlier
+  the same session, an older manual test draft from 2026-08-14) with
+  correct status-gated Place Order visibility (only on `status=draft`
+  rows). Submitted one new draft (`TESTSYM`) through the new form and
+  confirmed via the API it was created with exactly the submitted fields
+  and all blank-left fields correctly `null` -- did not click Place Order
+  on it or any other draft (that fires a real order; left for the user to
+  test themselves). No DELETE endpoint exists for entries, so this test
+  draft (id 4) stays in the table as a harmless, never-placed row.
+- **Four trader's-eye-view fixes to Announcement Trading (2026-08-17):**
+  asked to assess the page "as a trader who manages the algo platform" --
+  four real problems identified and fixed the same session:
+  1. *Activity feed defaulted to "All", burying signal in noise.* Most
+     rows are routine `symbol_not_tradeable`/`neutral_or_other` filings
+     that were never going to trade. Added a "Show" filter
+     (`AutoLoopControl.tsx`) defaulting to "Orders placed" instead of
+     "All" -- Skipped/All still one click away. Sentiment dropdown's
+     per-option counts now reflect the current outcome filter, not the
+     unfiltered set.
+  2. *Manual Trade Entry (added earlier the same session) was permanently
+     expanded, same visual weight as Positions.* It's an occasional
+     override action, not checked every visit. `TradeEntryPanel.tsx` now
+     uses the same `.collapse-toggle`/`.settings-body` pattern
+     `TradingSettingsPanel` already had, collapsed by default, showing a
+     "N draft pending" pill when relevant.
+  3. *Positions & P&L mixed open and already-flat (qty=0) rows in one
+     table* -- "what's open right now, at risk" had to be found by
+     scanning a Qty column. Both `PositionsPanel.tsx` (announcement) and
+     `EquityPositionsPanel.tsx` (equity) now split into "Open"/"Closed
+     today" sub-tables, open first.
+  4. *The Dashboard's risk strip (loops running/open positions/P&L/
+     errors) didn't follow you off the Dashboard* -- scroll down on any
+     other page and the top-level "is this live and what's it holding"
+     view was gone. Extracted to `shared/RiskStrip.tsx`, moved its CSS to
+     `shared/components.css`, and it now renders once from the app shell
+     (`App.tsx`, above `<Routes>`) so it's visible on every page
+     regardless of scroll position. Removed the now-duplicate inline copy
+     from `DashboardPage.tsx`.
+  Verified: `tsc -b`/`npm run build` clean; visually confirmed in-browser
+  on both Announcement Trading and Equity Trading -- risk strip persists
+  across pages, "Orders Placed (0)" default correctly shows the helpful
+  empty-state message instead of 100+ noise rows, "New trade entry"
+  toggle collapsed (▸) on load, Open/Closed sections rendering correctly
+  with real data (0 open, 5 closed today on Announcement Trading at
+  verification time).
+- **Session creation was hidden inside collapsed Settings (2026-08-17):**
+  user asked "where is the session creation???" -- traced to a real design
+  mistake from Phase 2: "Generate Token" and session status had been left
+  inside `TradingSettingsPanel`'s collapsed panel, alongside GTT %/amount/
+  order-type fields that really are configure-once. A session isn't --
+  Kite tokens expire daily, and nothing else on the page (START, positions,
+  manual trade entry) works without one -- so burying it behind a
+  collapsed toggle at the bottom of the page was wrong.
+  Split into a new `SessionPanel.tsx`: connection badge, account list,
+  and Generate Token (with its login-progress polling), moved out of
+  `TradingSettingsPanel.tsx` entirely and given its own always-visible,
+  uncollapsed "Kite Session" section -- now the *first* thing on the page,
+  above Status & Control. `TradingSettingsPanel.tsx` keeps only the
+  genuinely configure-once fields, still collapsed by default, renamed
+  from "Session & Settings" to plain "Settings" now that Session has its
+  own heading.
+  Verified: `tsc -b`/`npm run build` clean; visually confirmed in-browser
+  -- "Kite Session" now leads the page, showing "1 Kite account connected"
+  and the Generate Token button immediately, no longer hidden behind a
+  collapsed toggle.
+- **Sections looked "merged" -- card-based visual segregation
+  (2026-08-17):** user pointed out sections on Announcement Trading were
+  separated only by an `<h2>`, no real visual boundary, so the whole page
+  read as one continuous block rather than distinct sections -- asked for
+  proper UI/UX practice here. Standard fix: bordered/shadowed card per
+  section with a distinct header band, using tokens that already existed
+  (`--surface`/`--border`/`--radius`/`--shadow`, the exact same ones
+  Dashboard's own module cards already used) but had never been applied to
+  page-level sections.
+  Added `shared/Section.tsx` -- a card wrapper (title + optional
+  `headerRight` + body) -- used for Kite Session, Status & Control, and
+  Positions & P&L on both Announcement Trading and Equity Trading, and for
+  Symbol Explorer's chart/signals sections. `TradeEntryPanel`/
+  `TradingSettingsPanel` keep managing their own collapse (they need a
+  live badge in the header, which would mean prop-drilling a query result
+  up through the page to go through Section) -- but their existing
+  `.trading-settings`/`.collapse-toggle`/`.settings-body` CSS (moved from
+  `trading.css` to `shared/components.css`) was rewritten to match the
+  identical card language, so every section reads as the same kind of
+  thing regardless of which mechanism renders it.
+  Verified: `tsc -b`/`npm run build` clean; visually confirmed in-browser
+  on both pages -- Kite Session/Status & Control/Positions & P&L now each
+  render as clearly bordered, shadowed, distinct cards instead of a wall
+  of content divided only by heading text.
+- **Failed trade entries showed no reason (2026-08-17):** user tested
+  Manual Trade Entry's "Place Order" themselves (NMDC, qty 1) -- it
+  failed, and the table just said "failed" with no way to see why short
+  of reading backend logs. The real reason was already captured
+  (`order_result` JSON on the entry, `{"results": [{"zerodha_id":...,
+  "error":...}]}`) but never rendered. Added `orderErrors()` in
+  `TradeEntryPanel.tsx` -- parses `order_result`, extracts each account's
+  error, renders it directly under the "failed" status in the table
+  (`.entry-error`, small red text). Verified live: the NMDC row now shows
+  "NGQ901: Your order could not be converted to a After Market Order
+  (AMO)." right in the table.
+  Root cause of that specific failure, for context: it was 8:22 PM, well
+  after NSE market hours (09:15-15:30 IST) -- outside those hours Zerodha
+  requires AMO-eligible order construction, and `execution.py`'s plain
+  MARKET order isn't one. This isn't a bug in the automatic loop (its own
+  gate in `pipeline.py`, `MARKET_TRADE_START`/`MARKET_TRADE_END` =
+  09:15-15:28, correctly blocks it from ever attempting an order outside
+  that window) -- Manual Trade Entry has no equivalent gate, since placing
+  a manual order after hours is a legitimate thing a user might
+  deliberately want to do (e.g. queuing an AMO). Not fixed here; flagged
+  as an open question, not silently patched, since the right fix (build
+  proper AMO order construction, or warn-and-block instead) is a product
+  decision, not just a bug fix.
+- **"Orders placed" filter showed nothing despite real orders existing
+  (2026-08-17):** user reported two real announcement orders (ASALCBR,
+  THYROCARE, both placed earlier the same day) were missing from the
+  activity feed's new "Orders placed" filter. Root cause: `GET /activity`
+  always applied `LIMIT` to the *whole* `activity_log` table before any
+  filtering -- confirmed live, only 2 of 912 total rows that day had
+  `order_placed=1`, so on a day with this much routine/skipped traffic
+  the handful of real orders scroll out of "the most recent 100 rows of
+  everything" long before 100 more rows have been scanned since the last
+  one. The earlier "defaults to Orders placed" fix (same session) had
+  made this bug visible by making it the default view instead of an edge
+  case nobody hit.
+  Fixed at the source: `db.list_activity()` now takes an optional
+  `order_placed` filter and applies `WHERE order_placed = ?` *before*
+  `LIMIT`, not after; `GET /activity` exposes it as
+  `?order_placed=true|false`. `AutoLoopControl.tsx`'s activity query now
+  requests `order_placed=true` directly from the backend when that's the
+  active filter, instead of fetching the general recent-100 window and
+  filtering client-side. Also fixed the "Orders placed (N)" count itself,
+  which had the identical bug one level up (computed from whatever the
+  currently-active query returned, so it under-reported whenever a
+  different filter was selected) -- added a small always-on dedicated
+  count query so the badge is accurate regardless of which filter is
+  showing.
+  Verified live: `GET /activity?order_placed=true` now correctly returns
+  both real orders (ids 454, 492) despite them being ~450 rows older than
+  the most recent activity_log entry; confirmed in-browser -- "Orders
+  placed (2)" now lists THYROCARE and ASALCBR with their real
+  "ORDER PLACED (qty N)" outcomes.

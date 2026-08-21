@@ -1,0 +1,49 @@
+/* Page-specific rules only -- form/button/progress/log/table kit comes
+   from shared/components.css. */
+
+.bt-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1rem;
+}
+.bt-stat {
+  background: var(--border-soft);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  text-align: center;
+}
+.bt-stat-num {
+  font-family: var(--mono);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.bt-stat-lbl {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.2rem;
+}
+.bt-stat-pos .bt-stat-num {
+  color: var(--live);
+}
+.bt-stat-neg .bt-stat-num {
+  color: var(--danger);
+}
+
+.bt-table th,
+.bt-table td {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bt-symbol {
+  font-weight: 700;
+  font-variant-numeric: normal;
+}
+.bt-pos {
+  color: var(--live);
+}
+.bt-neg {
+  color: var(--danger);
+}

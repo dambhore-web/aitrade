@@ -37,3 +37,4 @@ kite_instances.pkl
 Thumbs.db
 .vscode/
 .idea/
+*.log.*

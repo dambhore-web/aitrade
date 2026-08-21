@@ -55,6 +55,27 @@ giving up -- ported behaviour is unchanged (same URL, same cookies read
 off the same headless Firefox), this only fixes the timing/sequencing
 get_app_id() itself never accounted for.
 
+Third deliberate change, and the one that actually matters: get_app_id()
+(Selenium) is NOT the only -- or even the primary -- source of nsit/
+nseappid in the original. Kite_API_31.py has a second, separate function,
+getCookiesFromDomain()/get_nse_token() (missed on the first two passes
+through this file), which does not automate a browser at all -- it calls
+browser_cookie3.firefox() to read cookies straight out of the local
+Firefox browser's own cookie store on disk, filters for the nseindia
+domain, and pulls nsit/nseappid from whatever's already there. That's
+cookies from a real, organically-browsed Firefox session -- no headless
+flag, no fresh blank automation profile, nothing for Akamai's bot check to
+ever see, because no bot is doing the visiting. Ported as
+_get_nse_cookies_from_local_browser(), tried first in
+_maybe_refresh_nse_session() before falling back to the Selenium
+get_app_id() port -- matches the original having both functions available,
+with this one being the one actually likely to produce a valid pair given
+the live evidence that Selenium's headless page-visit cannot get past
+Akamai on this machine. Requires a real Firefox profile on this machine to
+have visited nseindia.com recently enough for nsit/nseappid to still be
+live in its cookie store -- if none exists, this returns nothing and falls
+through to the Selenium attempt exactly as before.
+
 The TickerPlant merge step (an optional local file at D:\\ticker\\tp.csv in
 the original, wrapped in its own try/except that silently continues on
 failure) is not ported -- best-effort/optional there, and its absence here
@@ -109,7 +130,7 @@ NSE_HEADERS = {
 }
 PARAMS_NSE = {"index": "equities"}
 
-_MERGED_COLS = ["desc", "an_dt", "attchmntText", "attchmntFile", "symbol"]
+_MERGED_COLS = ["desc", "an_dt", "attchmntText", "attchmntFile", "symbol", "source"]
 
 _session = requests.Session()
 _news_type_lock = threading.Lock()
@@ -129,6 +150,37 @@ _last_nse_refresh_attempt: float = 0.0
 # nsit/nseappid from your own browser into Settings, see
 # seed_nse_cookies_from_settings() below -- does the actual work.
 NSE_REFRESH_COOLDOWN_SECONDS = 900
+
+
+def _get_nse_cookies_from_local_browser() -> tuple[str, str]:
+    """Faithful port of getCookiesFromDomain()/get_nse_token()
+    (Kite_API_31.py ~2049-2103) -- a second, separate NSE-cookie source in
+    the original that a first pass through this file missed entirely,
+    because it isn't wired to nse_data_new()'s except block at all; it's
+    the 'Get NSE Token' button's handler. It does not automate a browser --
+    it reads cookies directly out of the local Firefox install's own cookie
+    store via browser_cookie3.firefox(), filters for whatever domain
+    contains "nseindia", and returns nsit/nseappid from that. No headless
+    flag, no fresh automation profile, no page visited by anything --
+    exactly the same cookies a real human's ordinary Firefox browsing would
+    have left behind, so there's nothing here for Akamai's bot check to
+    ever evaluate. Requires an actual Firefox profile on this machine that
+    has visited nseindia.com recently enough for the cookies to still be
+    valid; returns ("xx", "xx") if browser_cookie3 finds nothing usable,
+    same placeholder-on-failure convention as the Selenium path."""
+    import browser_cookie3
+
+    try:
+        cookies: dict[str, str] = {}
+        for cookie in browser_cookie3.firefox():
+            if "nseindia" in cookie.domain:
+                cookies[cookie.name] = cookie.value
+        if "nsit" not in cookies or "nseappid" not in cookies:
+            return "xx", "xx"
+        return cookies["nseappid"], cookies["nsit"]
+    except Exception:
+        logger.exception("Reading NSE cookies from local Firefox failed")
+        return "xx", "xx"
 
 
 def _refresh_nse_cookies_via_browser() -> tuple[str, str]:
@@ -216,30 +268,64 @@ def _maybe_refresh_nse_session() -> None:
     global _last_nse_refresh_attempt
     if _nse_refresh_in_progress.is_set():
         return
-    if time.time() - _last_nse_refresh_attempt < NSE_REFRESH_COOLDOWN_SECONDS:
-        return
-    _last_nse_refresh_attempt = time.time()
     _nse_refresh_in_progress.set()
 
-    def _watchdog():
+    def _apply(app_id: str, nsit: str) -> None:
         global _session, _nse_cookies_refreshed
-        try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(_refresh_nse_cookies_via_browser)
-                try:
-                    app_id, nsit = future.result(timeout=90)
-                except FuturesTimeoutError:
-                    logger.error("NSE cookie refresh timed out after 90s")
-                    return
-            if app_id == "xx":
-                logger.warning("NSE cookie refresh failed -- browser could not establish a session")
-                return
-            _session.close()
-            _session = requests.Session()
-            _session.headers.update(NSE_HEADERS)
-            _session.cookies.update({"nseappid": app_id, "nsit": nsit})
-            _nse_cookies_refreshed = True
+        _session.close()
+        _session = requests.Session()
+        _session.headers.update(NSE_HEADERS)
+        _session.cookies.update({"nseappid": app_id, "nsit": nsit})
+        _nse_cookies_refreshed = app_id != "xx"
+        if app_id != "xx":
             logger.info("NSE session cookies refreshed successfully")
+        else:
+            logger.info(
+                "NSE session reset with fresh headers (cookies still placeholder 'xx') -- "
+                "confirmed empirically that this alone is enough for NSE to respond"
+            )
+
+    def _watchdog():
+        global _last_nse_refresh_attempt
+        try:
+            # Local-browser read first: cheap, instant, no bot-detection
+            # surface at all (see _get_nse_cookies_from_local_browser
+            # docstring).
+            app_id, nsit = _get_nse_cookies_from_local_browser()
+            if app_id == "xx":
+                logger.warning("No usable NSE cookies in local Firefox -- falling back to Selenium")
+                # Selenium fallback only, and only outside its own cooldown
+                # -- see NSE_REFRESH_COOLDOWN_SECONDS for why this one still
+                # needs one even though the original has no cooldown at all.
+                if time.time() - _last_nse_refresh_attempt >= NSE_REFRESH_COOLDOWN_SECONDS:
+                    _last_nse_refresh_attempt = time.time()
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(_refresh_nse_cookies_via_browser)
+                        try:
+                            app_id, nsit = future.result(timeout=90)
+                        except FuturesTimeoutError:
+                            logger.error("NSE cookie refresh timed out after 90s")
+                            app_id, nsit = "xx", "xx"
+                    if app_id == "xx":
+                        logger.warning(
+                            "NSE cookie refresh failed -- browser could not establish a session"
+                        )
+            # Reset the session and reapply fresh headers unconditionally,
+            # even with "xx" placeholder cookies -- exactly matching
+            # nse_data_new()'s except block, which does
+            # session.headers.update(set_header()) on every single refresh
+            # attempt regardless of whether get_app_id() returned real
+            # values or its own "xx" failure sentinel (it never raises, so
+            # the try block always reaches this line). Confirmed empirically
+            # (see docs/requirements.md decisions log) by running the exact
+            # original nse_data()/nse_data_new()/get_app_id() code, unmodified,
+            # in a repeating loop: the bare session with no headers attached
+            # gets silently dropped by NSE/Akamai (ReadTimeout, not a 403);
+            # the moment a realistic browser User-Agent + Accept/Referer/
+            # Sec-Fetch-* headers are attached -- via this exact reset --
+            # every subsequent call succeeded, repeatedly, with nsit/nseappid
+            # still == "xx". The cookies were never the actual gate.
+            _apply(app_id, nsit)
         finally:
             _nse_refresh_in_progress.clear()
 
@@ -382,11 +468,13 @@ def merge_bse_nse(data_nse: pd.DataFrame, data_b: pd.DataFrame) -> pd.DataFrame:
             sl["SCRIP_CD"] = pd.to_numeric(sl["SCRIP_CD"], downcast="signed")
             data_bse = pd.merge(data_b, sl, how="inner", on=["SCRIP_CD"])
             data_bse.rename(columns={"SYMBOL": "symbol", "Sector": "smIndustry"}, inplace=True)
+            data_bse["source"] = "BSE"
             data_bse = data_bse[_MERGED_COLS]
         else:
             data_bse = pd.DataFrame(columns=_MERGED_COLS)
 
         if not data_nse.empty:
+            data_nse["source"] = "NSE"
             data_nse = data_nse[[c for c in _MERGED_COLS if c in data_nse.columns]]
             for c in _MERGED_COLS:
                 if c not in data_nse.columns:
@@ -394,6 +482,29 @@ def merge_bse_nse(data_nse: pd.DataFrame, data_b: pd.DataFrame) -> pd.DataFrame:
             data_nse = data_nse[_MERGED_COLS]
         else:
             data_nse = pd.DataFrame(columns=_MERGED_COLS)
+
+        # NSE's an_dt ("15-Aug-2026 19:38:21") and BSE's DissemDT
+        # ("2026-08-17T20:53:43.727") come in different raw formats. Each is
+        # parsed here, per-source, BEFORE the two get concatenated --
+        # critical, not cosmetic: pandas' pd.to_datetime() on a column with
+        # NO explicit format= infers a single format from the first non-null
+        # value and applies that same format to the WHOLE column, silently
+        # turning every row in the *other* format into NaT rather than
+        # raising or falling back. Confirmed live (2026-08-17): concatenating
+        # BSE+NSE first and running one blind pd.to_datetime() over the
+        # mixed result (the previous code here) turned every NSE row into
+        # NaT whenever a BSE row happened to land first in the concat --
+        # which is exactly what BCLIND's "stale_news" false positive and the
+        # blank "Announced" column on RPTECH/LLOYDSENGG/HATSUN/OBEROIRLTY
+        # (2026-08-17) were: real, present, valid an_dt values silently
+        # discarded by format misinference, not missing/unparseable source
+        # data as originally suspected. Parsing each source separately, each
+        # with a column that only ever contains its own single format, is
+        # immune to this by construction.
+        if not data_bse.empty:
+            data_bse["an_dt"] = pd.to_datetime(data_bse["an_dt"], errors="coerce")
+        if not data_nse.empty:
+            data_nse["an_dt"] = pd.to_datetime(data_nse["an_dt"], format="%d-%b-%Y %H:%M:%S", errors="coerce")
 
         if len(data_nse) > 0 and len(data_bse) > 0:
             data = pd.concat([data_bse, data_nse], ignore_index=True)
@@ -407,6 +518,7 @@ def merge_bse_nse(data_nse: pd.DataFrame, data_b: pd.DataFrame) -> pd.DataFrame:
         data = data.sort_values("an_dt", ascending=False)
         data = data.drop_duplicates(subset="symbol", keep="first")
         data = data[data["desc"].apply(check_desc)]
+        data["an_dt"] = data["an_dt"].dt.strftime("%Y-%m-%dT%H:%M:%S")
         return data
     except Exception:
         logger.exception("Error in merge_bse_nse")
@@ -480,6 +592,63 @@ def get_stock_info(exchange: str, stock_name: str) -> tuple[float, float]:
     except Exception:
         logger.debug("get_stock_info failed for %s:%s", exchange, stock_name, exc_info=True)
         return 100, 0
+
+
+def get_positions_with_pnl() -> list[dict]:
+    """Symbol-wise P&L across every account in the shared Kite session --
+    ported from Kite_API_31.py's get_open_position_count() (the function
+    behind the GUI's "Total Profit" column), read-only (kite.positions() is
+    account-state, not an order).
+
+    Same P&L formula as the original: for an open (quantity != 0) position,
+    (last_price - average_price) * quantity, refreshing last_price via a
+    live quote first; for quantity == 0 (already squared off), Kite's own
+    'pnl' field is realized P&L and is kept as-is, exactly like the
+    original's np.where(quantity==0, existing pnl, computed pnl).
+
+    Deliberately does NOT reproduce a bug found while tracing the original:
+    get_open_position_count() returns a single DataFrame on its success
+    path, but every caller unpacks it as two values
+    (`all_positions, open_positions_df = get_open_position_count(kite)`),
+    which raises on any real data and gets silently caught by the caller's
+    own except block -- meaning the original likely never actually
+    surfaced this in the GUI. The P&L formula and kite.positions() call are
+    faithfully ported; the return shape here is just made internally
+    consistent instead."""
+    instances = session.get_kite_instances()
+    out: list[dict] = []
+    for kite, user in instances:
+        zerodha_id = user.get("Zerodha ID")
+        try:
+            response_p = kite.positions()
+        except Exception:
+            logger.exception("kite.positions() failed for %s", zerodha_id)
+            continue
+        net_data = (response_p or {}).get("net", [])
+        if not net_data:
+            continue
+        for pos in net_data:
+            quantity = pos.get("quantity") or 0
+            average_price = pos.get("average_price") or 0
+            last_price = pos.get("last_price") or 0
+            pnl = pos.get("pnl") or 0
+            if quantity != 0:
+                if quantity > 0:
+                    last_price = get_current_price(pos.get("tradingsymbol", ""))
+                pnl = round((last_price - average_price) * quantity, 2)
+            out.append(
+                {
+                    "zerodha_id": zerodha_id,
+                    "tradingsymbol": pos.get("tradingsymbol"),
+                    "exchange": pos.get("exchange"),
+                    "product": pos.get("product"),
+                    "quantity": quantity,
+                    "average_price": average_price,
+                    "last_price": last_price,
+                    "pnl": pnl,
+                }
+            )
+    return out
 
 
 def get_current_price(security: str) -> float:

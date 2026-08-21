@@ -1,21 +1,24 @@
 import asyncio
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from . import auto_loop, db, execution, market_data, session, session_login
+from . import auto_loop, db, execution, market_data, session, session_login, truewealth_source
 from .broadcaster import broadcaster
 from .schemas import (
     ActivityResponse,
     AutoLoopStatus,
     LoginJobStatus,
+    PositionsResponse,
     SessionStatus,
     SettingsOut,
     SettingsUpdate,
     TradeEntriesResponse,
     TradeEntryCreate,
     TradeEntryOut,
+    TrueWealthStatus,
 )
 
 logger = logging.getLogger("announcement_trading.router")
@@ -52,6 +55,16 @@ def update_settings(body: SettingsUpdate) -> dict:
     s["telegram_enabled"] = bool(s["telegram_enabled"])
     market_data.seed_nse_cookies_from_settings(s.get("nse_app_id", ""), s.get("nse_it", ""))
     return s
+
+
+@router.get("/positions", response_model=PositionsResponse)
+def positions() -> dict:
+    """Symbol-wise P&L across every account in the shared session --
+    read-only (kite.positions()), see market_data.get_positions_with_pnl()."""
+    if not session.pkl_path().exists():
+        return {"items": [], "total_pnl": 0.0}
+    items = market_data.get_positions_with_pnl()
+    return {"items": items, "total_pnl": round(sum(i["pnl"] for i in items), 2)}
 
 
 @router.get("/session-status", response_model=SessionStatus)
@@ -132,6 +145,7 @@ def place_order(entry_id: int) -> dict:
         stop_loss_price,
         target_price,
         current_price,
+        settings.get("market_protection_pct", 3.0) or 3.0,
     )
     any_ok = any("order_id" in r for r in results)
     return db.mark_entry_placed(_conn, entry_id, {"results": results, "current_price": current_price}, "placed" if any_ok else "failed")
@@ -163,9 +177,32 @@ def auto_loop_status() -> dict:
     return auto_loop.get_status()
 
 
+# ---------------------------------------------------------------------
+# TrueWealth (TrueData wealth backend) BSE announcement source -- a
+# genuinely separate poller from the NSE/BSE auto loop above (see
+# truewealth_source.py's module docstring for why), started/stopped
+# independently. Runs a real, visible Chromium window when started.
+# ---------------------------------------------------------------------
+@router.post("/truewealth/start", response_model=TrueWealthStatus)
+def start_truewealth() -> dict:
+    truewealth_source.start()
+    return truewealth_source.get_status()
+
+
+@router.post("/truewealth/stop", response_model=TrueWealthStatus)
+def stop_truewealth() -> dict:
+    truewealth_source.stop()
+    return truewealth_source.get_status()
+
+
+@router.get("/truewealth/status", response_model=TrueWealthStatus)
+def truewealth_status() -> dict:
+    return truewealth_source.get_status()
+
+
 @router.get("/activity", response_model=ActivityResponse)
-def list_activity(limit: int = 100) -> dict:
-    return {"items": db.list_activity(_conn, limit)}
+def list_activity(limit: int = 100, order_placed: Optional[bool] = None) -> dict:
+    return {"items": db.list_activity(_conn, limit, order_placed)}
 
 
 @router.get("/activity/stream")

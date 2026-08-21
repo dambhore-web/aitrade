@@ -6,6 +6,7 @@ export interface TradingSettings {
   amount: number;
   gtt_stop_pct: number;
   gtt_target_pct: number;
+  market_protection_pct: number;
   nse_app_id: string;
   nse_it: string;
   telegram_enabled: boolean;
@@ -80,6 +81,9 @@ export interface ActivityItem {
   quantity: number | null;
   current_price: number | null;
   trade_entry_id: number | null;
+  source: string | null;
+  an_dt: string | null;
+  attachment_url: string | null;
 }
 
 export interface ActivityResponse {
@@ -95,4 +99,28 @@ export interface AutoLoopStatus {
   processed_count: number;
   bse_error: string | null;
   nse_error: string | null;
+}
+
+export interface TrueWealthStatus {
+  running: boolean;
+  authorized: boolean;
+  last_poll_utc: string | null;
+  last_error: string | null;
+  processed_count: number;
+}
+
+export interface PositionItem {
+  zerodha_id: string | null;
+  tradingsymbol: string | null;
+  exchange: string | null;
+  product: string | null;
+  quantity: number;
+  average_price: number;
+  last_price: number;
+  pnl: number;
+}
+
+export interface PositionsResponse {
+  items: PositionItem[];
+  total_pnl: number;
 }

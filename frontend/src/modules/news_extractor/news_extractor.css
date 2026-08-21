@@ -1,0 +1,33 @@
+/* Page-specific rules only -- the old hardcoded PySide6-replica palette
+   (fixed light grays/blues that ignored dark mode entirely) is gone;
+   this page now uses Section cards + the shared form-grid/log-panel/
+   progress-track/entries-table kit from shared/components.css, same as
+   every other page. Only what's genuinely specific to this table's own
+   columns lives here. */
+
+.ne-buttons {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.3rem;
+}
+
+.ne-table th,
+.ne-table td {
+  white-space: nowrap;
+}
+
+.ne-sentiment-positive {
+  color: var(--live);
+  font-weight: 600;
+}
+.ne-sentiment-neutral {
+  color: var(--ink-soft);
+}
+
+.ne-gain-pos {
+  color: var(--live);
+}
+.ne-gain-neg {
+  color: var(--danger);
+}

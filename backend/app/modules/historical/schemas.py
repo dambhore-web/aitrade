@@ -34,6 +34,7 @@ class JobCreateRequest(BaseModel):
     end_date: dt.date
     incremental: bool = True
     continuous: bool = False
+    output_dir: Optional[str] = None
 
 
 class JobCreateResponse(BaseModel):
@@ -53,6 +54,7 @@ class JobStatusResponse(BaseModel):
     interval: str
     start_date: dt.date
     end_date: dt.date
+    output_dir: str
     progress: dict[str, SymbolProgressOut]
     log_tail: list[str]
     done_count: int

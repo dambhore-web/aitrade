@@ -1,0 +1,52 @@
+/* Page-specific rules only -- form/button/progress/log/table kit comes
+   from shared/components.css. */
+
+.scr-table th,
+.scr-table td {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.scr-symbol {
+  font-weight: 700;
+  font-variant-numeric: normal;
+}
+.scr-score {
+  font-family: var(--mono);
+  font-weight: 700;
+}
+.scr-row-pass {
+  background: var(--live-soft);
+}
+.scr-pass {
+  color: var(--live);
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.scr-fail {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+/* Level 2 -- Elder Triple Screen */
+.scr-row-elder {
+  background: var(--danger-soft);
+}
+.scr-tide-down {
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+.scr-tide-up {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+.scr-divergence {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--paper);
+}
+.scr-elder-pass {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.78rem;
+}

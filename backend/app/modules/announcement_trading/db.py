@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS settings(
   amount INTEGER NOT NULL DEFAULT 0,
   gtt_stop_pct REAL NOT NULL DEFAULT -0.60,
   gtt_target_pct REAL NOT NULL DEFAULT 20,
+  market_protection_pct REAL NOT NULL DEFAULT 3.0,
   nse_app_id TEXT NOT NULL DEFAULT '',
   nse_it TEXT NOT NULL DEFAULT '',
   telegram_enabled INTEGER NOT NULL DEFAULT 0,
@@ -47,9 +48,44 @@ CREATE TABLE IF NOT EXISTS activity_log(
   order_placed INTEGER NOT NULL DEFAULT 0,
   quantity INTEGER,
   current_price REAL,
-  trade_entry_id INTEGER
+  trade_entry_id INTEGER,
+  source TEXT,
+  an_dt TEXT,
+  attachment_url TEXT
 );
 """
+
+# Columns added after the table's initial release -- ALTER TABLE ADD COLUMN
+# for anyone with an existing activity_log.db predating them. CREATE TABLE
+# IF NOT EXISTS above only helps on a fresh DB; existing rows/tables need
+# this to pick up the new columns without losing history.
+_ACTIVITY_LOG_MIGRATIONS = [
+    "ALTER TABLE activity_log ADD COLUMN source TEXT",
+    "ALTER TABLE activity_log ADD COLUMN an_dt TEXT",
+    "ALTER TABLE activity_log ADD COLUMN attachment_url TEXT",
+]
+
+# stop_loss_price/target_price are the ABSOLUTE prices the entry's GTT bracket was
+# actually placed at -- distinct from the existing stop_loss_pct/target_pct columns,
+# which are percentages used only by the manual draft-entry flow (router.py's
+# POST /entries). Added 2026-08-17 for exit_management.py, which needs the real
+# bracket prices back to re-place a GTT that triggered one leg while still holding
+# the position.
+_TRADE_ENTRIES_MIGRATIONS = [
+    "ALTER TABLE trade_entries ADD COLUMN stop_loss_price REAL",
+    "ALTER TABLE trade_entries ADD COLUMN target_price REAL",
+]
+
+# -1 (Zerodha/exchange's own automatic protection band) was the original's
+# hardcoded value -- confirmed correct per kiteconnect's own place_order()
+# docstring, but real live behavior traced 2026-08-19 (ITI: order submitted
+# in <1s, sat unfilled for 9 minutes waiting for price to re-enter the
+# exchange's band after a post-news spike). User explicitly chose a wider,
+# user-configurable percentage (3% default) over the exchange default, to
+# trade a little more price risk for materially faster fills.
+_SETTINGS_MIGRATIONS = [
+    "ALTER TABLE settings ADD COLUMN market_protection_pct REAL NOT NULL DEFAULT 3.0",
+]
 
 CREATE_TRADE_ENTRIES = """
 CREATE TABLE IF NOT EXISTS trade_entries(
@@ -89,6 +125,24 @@ def db_init(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO settings (id) VALUES (1)"
     )
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(activity_log)").fetchall()}
+    for stmt in _ACTIVITY_LOG_MIGRATIONS:
+        col_name = stmt.split("ADD COLUMN")[1].strip().split(" ")[0]
+        if col_name not in existing_cols:
+            conn.execute(stmt)
+
+    existing_entry_cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_entries)").fetchall()}
+    for stmt in _TRADE_ENTRIES_MIGRATIONS:
+        col_name = stmt.split("ADD COLUMN")[1].strip().split(" ")[0]
+        if col_name not in existing_entry_cols:
+            conn.execute(stmt)
+
+    existing_settings_cols = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
+    for stmt in _SETTINGS_MIGRATIONS:
+        col_name = stmt.split("ADD COLUMN")[1].strip().split(" ")[0]
+        if col_name not in existing_settings_cols:
+            conn.execute(stmt)
+
     conn.commit()
 
 
@@ -104,8 +158,23 @@ def log_activity(conn: sqlite3.Connection, fields: dict) -> dict:
     return dict(row)
 
 
-def list_activity(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
-    rows = conn.execute("SELECT * FROM activity_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+def list_activity(conn: sqlite3.Connection, limit: int = 100, order_placed: Optional[bool] = None) -> list[dict]:
+    """order_placed=True finds real placed orders regardless of how far
+    back they are -- added 2026-08-17 after "Orders placed" in the UI
+    showed nothing even though orders really had been placed that day.
+    Root cause: this always applied LIMIT to the whole table before any
+    filtering, so on a busy day (skipped/routine rows vastly outnumber
+    real orders -- confirmed live: 2 placed among 912 total rows) the
+    handful of real orders scroll out of "the most recent N rows"
+    entirely, long before N rows have even been scanned since the last
+    one. Filtering first, then limiting, fixes that."""
+    if order_placed is None:
+        rows = conn.execute("SELECT * FROM activity_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM activity_log WHERE order_placed = ? ORDER BY id DESC LIMIT ?",
+            (int(order_placed), limit),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 

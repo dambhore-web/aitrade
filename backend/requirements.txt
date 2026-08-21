@@ -5,7 +5,7 @@ pydantic-settings==2.7.1
 python-dotenv==1.0.1
 
 # Module D (Historical Extractor) -- matches Trading_bot/requirements.txt pin
-kiteconnect==5.0.1
+kiteconnect==5.2.1
 pandas>=2.2
 
 # Module A (Announcements) -- needed to import the legacy modules being wrapped
@@ -25,3 +25,7 @@ spacy>=3.7
 openpyxl>=3.1
 selenium>=4.8
 pyotp>=2.9
+# NSE nsit/nseappid: getCookiesFromDomain() in Kite_API_31.py reads these
+# straight from the local Firefox cookie store (browser_cookie3.firefox())
+# rather than automating a browser -- pinned to match Trading_bot/requirements.txt.
+browser-cookie3==0.19.1

@@ -61,15 +61,12 @@ def create_job(body: JobCreateRequest) -> dict:
         end_date=body.end_date,
         incremental=body.incremental,
         continuous=body.continuous,
+        output_dir=body.output_dir,
     )
     return {"id": job.id}
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-def job_status(job_id: str) -> dict:
-    job = jobs.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
+def _job_status_dict(job: jobs.Job) -> dict:
     done = sum(1 for p in job.progress.values() if p.status in ("success", "failed"))
     return {
         "id": job.id,
@@ -79,6 +76,7 @@ def job_status(job_id: str) -> dict:
         "interval": job.interval,
         "start_date": job.start_date,
         "end_date": job.end_date,
+        "output_dir": job.output_dir,
         "progress": {
             s: SymbolProgressOut(status=p.status, message=p.message) for s, p in job.progress.items()
         },
@@ -86,6 +84,22 @@ def job_status(job_id: str) -> dict:
         "done_count": done,
         "total_count": len(job.progress),
     }
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def job_status(job_id: str) -> dict:
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return _job_status_dict(job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobStatusResponse)
+def cancel_job(job_id: str) -> dict:
+    job = jobs.cancel_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return _job_status_dict(job)
 
 
 @router.get("/jobs/{job_id}/result")

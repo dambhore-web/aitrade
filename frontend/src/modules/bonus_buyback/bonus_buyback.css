@@ -1,0 +1,33 @@
+/* Page-specific rules only -- form/button/log/table kit now comes from
+   shared/components.css (form-grid, primary-button, log-panel,
+   entries-table). Only this page's own qualifies-highlight and
+   appended-banner treatment stay here. */
+
+.bb-page {
+  max-width: 1100px;
+}
+
+.bb-appended-banner {
+  background: var(--live-soft);
+  border: 1px solid var(--live);
+  color: var(--live);
+  border-radius: 7px;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+
+.bb-table th,
+.bb-table td {
+  white-space: nowrap;
+}
+.bb-table tr.bb-qualifies td {
+  background: var(--paper-soft);
+  font-weight: 600;
+}
+.bb-empty-row td {
+  text-align: center;
+  color: var(--ink-soft);
+  font-weight: normal;
+  background: none;
+}

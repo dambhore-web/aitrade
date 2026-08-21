@@ -6,9 +6,16 @@ is a 235KB monolith with substantial module-level side effects on import
 etc. -- see docs/requirements.md open-questions log), so importing it
 wholesale just to reuse these two self-contained functions would be far
 riskier than porting them. Behavior is intentionally unchanged from the
-original: MARKET order, immediate GTT OCO (stop-loss + target) bracket,
-per-account MULTIPLIER-scaled quantity, MTF-not-allowed-on-exchange retry
-on BSE/CNC.
+original: MARKET order with market_protection=-1.0, immediate GTT OCO
+(stop-loss + target) bracket, per-account MULTIPLIER-scaled quantity,
+MTF-not-allowed-on-exchange retry on BSE/CNC.
+
+2026-08-17: every order this module attempted failed with "unexpected
+keyword argument 'market_protection'" (0 placed) -- kiteconnect 5.0.1 (then
+installed) had dropped market_protection from place_order()'s signature.
+Root-caused, not patched around here: kiteconnect was upgraded to 5.2.1
+(requirements.txt), which restores market_protection exactly as the
+original expects. This file itself needed no behavior change.
 """
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,11 +35,22 @@ def place_orders(
     stop_loss_price: float,
     target_price: float,
     current_price: float,
+    market_protection_pct: float = 3.0,
 ) -> Optional[dict]:
     """Places one MARKET order + a GTT OCO bracket for one account. Returns
     {"order_id", "gtt_trigger_id", "exchange"} on success, None on failure
     (matches the original's return-None-on-any-error behavior -- errors are
-    logged, not raised, so one account's failure doesn't stop the others)."""
+    logged, not raised, so one account's failure doesn't stop the others).
+
+    market_protection_pct: the original hardcoded -1 here (Zerodha/exchange's
+    own automatic protection band) -- confirmed correct per kiteconnect's own
+    place_order() docstring, but traced live 2026-08-19 (ITI: order submitted
+    in <1s, then sat unfilled for 9 minutes waiting for price to re-enter the
+    exchange's band after a post-news spike). Now a user-configurable
+    percentage (Trading Settings, default 3%) instead -- wider than whatever
+    band the exchange would have picked, trading a little more price risk
+    for materially faster fills on exactly the kind of fresh-news volatility
+    this module trades into."""
     zerodha_id = user.get("Zerodha ID", "unknown")
     try:
         multiplier = user.get("MULTIPLIER", 1) or 1
@@ -48,7 +66,7 @@ def place_orders(
                 quantity=adjusted_quantity,
                 product=product_type,
                 order_type="MARKET",
-                market_protection=-1.0,
+                market_protection=market_protection_pct,
             )
         except Exception as e:
             if "MTF orders are only allowed on NSE" in str(e):
@@ -62,7 +80,7 @@ def place_orders(
                     quantity=adjusted_quantity,
                     product="CNC",
                     order_type="MARKET",
-                    market_protection=-1.0,
+                    market_protection=market_protection_pct,
                 )
             else:
                 raise
@@ -116,6 +134,7 @@ def place_orders_parallel(
     stop_loss_price: float,
     target_price: float,
     current_price: float,
+    market_protection_pct: float = 3.0,
 ) -> list[dict]:
     """Runs place_orders() across every connected account in parallel.
     Unlike the original (which only logged results), this returns them --
@@ -127,6 +146,7 @@ def place_orders_parallel(
             executor.submit(
                 place_orders, kite, user, base_quantity, exchange, symbol,
                 transaction_type, product_type, stop_loss_price, target_price, current_price,
+                market_protection_pct,
             )
             for kite, user in kite_instances
         ]

@@ -3,6 +3,16 @@ Module D service layer -- thin wrapper over the legacy zerodha_api_core.py
 (official Kite Connect API based downloader core). No download orchestration
 lives here; see jobs.py for that. This module owns: Kite session/auth,
 instrument list caching.
+
+Session: reuses the SAME shared multi-account Kite session Announcement
+Trading's "Generate Token" flow establishes
+(announcement_trading.session.get_kite_instances(), backed by
+Trading_bot/kite_instances.pkl), instead of this module's own separate
+KITE_API_KEY/SECRET OAuth login (login_url()/complete_login() below, now
+unused by get_kite() but left in place in case a standalone flow is ever
+needed again). One authenticated session for the whole platform, not one
+per tool -- explicit instruction: "Both tools should use the same kite
+session common."
 """
 import datetime as dt
 import threading
@@ -13,6 +23,7 @@ from kiteconnect import KiteConnect
 
 from app.core.config import get_settings
 from app.core.legacy_path import add_legacy_root_to_path
+from app.modules.announcement_trading import session as kite_session
 
 add_legacy_root_to_path()
 import zerodha_api_core as core  # noqa: E402  (must follow add_legacy_root_to_path)
@@ -28,28 +39,34 @@ _instruments_lock = threading.Lock()
 
 
 def get_kite() -> KiteConnect:
-    """Return an authenticated KiteConnect client, or raise PermissionError
-    if the login flow (login_url -> complete_login) hasn't been done today
-    -- Kite access tokens expire ~6am IST daily (see zerodha_api_core.py)."""
-    settings = get_settings()
-    if not settings.kite_api_key:
-        raise RuntimeError("KITE_API_KEY not set in backend/.env")
-    cached = core.load_cached_session()
-    if not cached or cached.get("api_key") != settings.kite_api_key:
-        raise PermissionError("Not authenticated with Kite yet today -- complete the login flow first")
-    kite = KiteConnect(api_key=settings.kite_api_key)
-    kite.set_access_token(cached["access_token"])
-    return kite
+    """Return the shared session's first KiteConnect instance, or raise
+    PermissionError if no session has been established yet -- same pattern
+    as equity_auto_trading.scanner_loop._get_kite()."""
+    instances = kite_session.get_kite_instances()
+    if not instances:
+        raise PermissionError(
+            "No Kite session found -- generate a token first (Announcement Trading page) "
+            "before downloading."
+        )
+    return instances[0][0]
 
 
 def auth_status() -> dict:
-    settings = get_settings()
-    cached = core.load_cached_session()
-    authenticated = bool(cached and cached.get("api_key") == settings.kite_api_key)
-    return {"authenticated": authenticated, "api_key_configured": bool(settings.kite_api_key)}
+    """Reflects the shared session now, not this module's own (unused)
+    OAuth flow -- api_key_configured is kept for the frontend's existing
+    error message, always True here since there's no separate key to check."""
+    try:
+        instances = kite_session.get_kite_instances()
+        authenticated = len(instances) > 0
+    except FileNotFoundError:
+        authenticated = False
+    return {"authenticated": authenticated, "api_key_configured": True}
 
 
 def login_url() -> str:
+    """Unused now that get_kite() reuses the shared session -- left in
+    place (not deleted) in case a standalone Kite Connect API key flow is
+    ever needed again independent of Announcement Trading's session."""
     settings = get_settings()
     if not settings.kite_api_key:
         raise RuntimeError("KITE_API_KEY not set in backend/.env")
@@ -57,6 +74,7 @@ def login_url() -> str:
 
 
 def complete_login(request_token: str) -> None:
+    """Unused now -- see login_url() docstring."""
     settings = get_settings()
     if not settings.kite_api_key or not settings.kite_api_secret:
         raise RuntimeError("KITE_API_KEY / KITE_API_SECRET not set in backend/.env")

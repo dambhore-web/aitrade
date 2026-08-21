@@ -29,6 +29,15 @@ class Settings(BaseSettings):
         r"D:\Trading System\Trading_bot\_archive\other_bot_projects\new_trade_tool"
     )
 
+    # TrueWealth (TrueData wealth backend) BSE announcement source -- a
+    # sibling checkout (TrueWealthScraper) whose already-logged-in
+    # browser_profile this module's own truewealth_source.py copies once
+    # (see _ensure_profile_copied()) so aitrade's native Playwright poller
+    # doesn't need a fresh interactive login. Only that one directory is
+    # ever read from this path; nothing in aitrade imports or runs that
+    # project's own script.
+    truewealth_root: Path = Path(r"D:\Trading System\TrueWealthScraper")
+
     # CORS origins allowed to call this API -- just the local Vite dev server
     # and local build preview for now (single-user, local-only platform).
     cors_origins: list[str] = [

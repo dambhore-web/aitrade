@@ -1,0 +1,427 @@
+/* Shared component styles -- Phase 3 of the nav/UI redesign (see
+   docs/requirements.md). These rules were previously copy-pasted, near
+   verbatim, across trading.css/equity.css (and partly historical.css) --
+   consolidated here once, on the theme.css token set, and imported once
+   in App.tsx. Each module's own CSS file keeps only what's genuinely
+   page-specific (layout grids, form fields, chart containers, etc.). */
+
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 0.4em;
+  vertical-align: -0.15em;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-line {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* Every module's own data table (activity/entries/signals/job-progress)
+   shares this base -- module CSS may still add its own extra rules
+   (e.g. trading.css's activity-table cell truncation) on top. */
+.activity-table,
+.entries-table,
+.signals-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.activity-table th,
+.activity-table td,
+.entries-table th,
+.entries-table td,
+.signals-table th,
+.signals-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.activity-table th,
+.entries-table th,
+.signals-table th {
+  background: var(--ink);
+  color: #fff;
+}
+
+.banner {
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.banner-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.banner-warning {
+  background: var(--paper-soft);
+  color: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--paper) 35%, transparent);
+}
+
+.positions-panel {
+  margin-bottom: 1rem;
+}
+.positions-panel h4 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 1rem 0 0.4rem;
+}
+.pnl-total {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.pnl-pos {
+  color: var(--live);
+}
+.pnl-neg {
+  color: var(--danger);
+}
+
+.control-panel {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.start-button,
+.stop-button {
+  padding: 0.5rem 1.3rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  color: #fff;
+}
+.start-button {
+  background: var(--live);
+}
+.stop-button {
+  background: var(--danger);
+}
+.start-button:disabled,
+.stop-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Generic connected/not-connected pill (Kite session status, etc.) --
+   same visual language as StatusBadge (shared/StatusBadge.tsx) for pages
+   that render this server-side pattern directly rather than through the
+   React component. */
+.session-pill {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+.session-ok {
+  background: var(--live-soft);
+  color: var(--live);
+}
+.session-off {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.processed-count {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Section (shared/Section.tsx) -- the card wrapper every page section
+   uses so sections read as distinct, bordered blocks instead of just
+   headings separating a wall of content. */
+.page-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+.page-section-header {
+  padding: 0.9rem 1.3rem;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.page-section-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.page-section-body {
+  padding: 1.2rem 1.3rem;
+}
+
+/* Self-collapsing panels (TradingSettingsPanel, TradeEntryPanel) manage
+   their own open/closed state and need a live badge in the header, so
+   they don't go through Section -- but use the identical card language
+   so they read as the same kind of thing regardless. */
+.trading-settings {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+.collapse-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.3rem;
+  background: none;
+  border: none;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+}
+.collapse-toggle:hover {
+  background: var(--border-soft);
+}
+.settings-body {
+  padding: 1.2rem 1.3rem;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* RiskStrip (shared/RiskStrip.tsx) -- rendered once from the app shell,
+   above every page, so "is anything live and what's it holding" is never
+   out of view regardless of which page or how far down it you've
+   scrolled. */
+.risk-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--stopped);
+  border-radius: 9px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.6rem;
+  flex-wrap: wrap;
+}
+.risk-strip.risk-strip-live {
+  border-left-color: var(--live);
+}
+.risk-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.risk-metric .num {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+}
+.risk-metric .num-danger {
+  color: var(--danger);
+}
+.risk-metric .lbl {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+.risk-strip .status-badge {
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------------
+   Generic tool-page kit -- added 2026-08-17 so Historical/News Extractor/
+   Bonus-Buyback (job-config-form -> run -> results-table pages) stop each
+   reinventing their own input/button/progress/log styling from scratch.
+   News Extractor previously had its own hardcoded PySide6-replica palette
+   here that ignored dark mode entirely; these are the same shapes
+   (grid form, primary/secondary buttons, log panel, progress bar) built
+   once on the shared token set so every tool page matches. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+.form-grid .field-wide {
+  grid-column: 1 / -1;
+}
+.form-grid .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.form-grid input[type="text"],
+.form-grid input[type="date"],
+.form-grid input[type="file"],
+.form-grid select,
+.form-grid textarea {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+.form-grid input:focus-visible,
+.form-grid select:focus-visible,
+.form-grid textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin: 0.15rem 0 0;
+}
+
+.primary-button,
+.secondary-button {
+  padding: 0.55rem 1.2rem;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.primary-button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+.secondary-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+}
+.secondary-button:hover:not(:disabled) {
+  background: var(--border-soft);
+}
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background: var(--border-soft);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.progress-fill.indeterminate {
+  width: 35%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  0% { margin-left: 0%; }
+  50% { margin-left: 65%; }
+  100% { margin-left: 0%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill.indeterminate { animation: none; margin-left: 0; width: 100%; opacity: 0.5; }
+}
+
+.log-panel {
+  background: var(--ink);
+  color: #d7dbe2;
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  height: 150px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.log-panel .log-line-error {
+  color: var(--danger);
+}
+
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 7px;
+  background: var(--live);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.download-link:hover {
+  filter: brightness(1.08);
+}
+
+.section-status {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.result-table-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 1.4rem 0 0.6rem;
+}
+.result-table-title:first-child {
+  margin-top: 0;
+}

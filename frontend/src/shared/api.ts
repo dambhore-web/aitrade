@@ -71,3 +71,8 @@ export async function apiPut<T>(path: string, body: unknown, timeoutMs?: number)
   );
   return handle<T>(res);
 }
+
+export async function apiDelete<T>(path: string, timeoutMs?: number): Promise<T> {
+  const res = await timedFetch(path, { method: "DELETE" }, timeoutMs);
+  return handle<T>(res);
+}

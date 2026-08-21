@@ -16,6 +16,7 @@ _lock = threading.Lock()
 _zerodha_list_equity: Optional[pd.DataFrame] = None
 _symbol_list: Optional[pd.DataFrame] = None
 _bonus_buyback_list: Optional[pd.DataFrame] = None
+_bonus_buyback_list_mtime: Optional[float] = None
 _black_listed_df: Optional[pd.DataFrame] = None
 _categories_to_exclude: Optional[list[str]] = None
 _sto_loss_data: Optional[pd.DataFrame] = None
@@ -46,11 +47,28 @@ def symbol_list() -> pd.DataFrame:
 def bonus_buyback_list() -> pd.DataFrame:
     """Doubles as the symbol+category "already processed" store in the
     original (check_symbol_and_pred_bert_existence) -- not actually
-    bonus/buyback specific data by the time it's used this way."""
-    global _bonus_buyback_list
+    bonus/buyback specific data by the time it's used this way.
+
+    Unlike this module's other lazy-loaded tables, this one is re-read
+    whenever the file's mtime changes rather than cached forever: the new
+    Bonus/Buyback Download page (app/modules/bonus_buyback/) writes to this
+    exact file from the same long-lived backend process the auto-loop runs
+    in, specifically so gates.already_processed() picks up newly-logged
+    rows without a restart. A plain load-once cache (still fine for the
+    genuinely-static tables above) would have silently made every append
+    invisible to the gate until the process restarted -- caught while
+    verifying the exclusion logic actually works end-to-end, not just in
+    isolation."""
+    global _bonus_buyback_list, _bonus_buyback_list_mtime
+    path = _inputs_dir() / "bonus_buyback.csv"
     with _lock:
-        if _bonus_buyback_list is None:
-            _bonus_buyback_list = pd.read_csv(_inputs_dir() / "bonus_buyback.csv")
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if _bonus_buyback_list is None or mtime != _bonus_buyback_list_mtime:
+            _bonus_buyback_list = pd.read_csv(path)
+            _bonus_buyback_list_mtime = mtime
         return _bonus_buyback_list
 
 

@@ -30,6 +30,7 @@ export interface JobCreateRequest {
   end_date: string;
   incremental: boolean;
   continuous: boolean;
+  output_dir: string | null;
 }
 
 export interface JobCreateResponse {
@@ -43,12 +44,13 @@ export interface SymbolProgress {
 
 export interface JobStatusResponse {
   id: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "cancelled";
   error: string | null;
   exchange: string;
   interval: string;
   start_date: string;
   end_date: string;
+  output_dir: string;
   progress: Record<string, SymbolProgress>;
   log_tail: string[];
   done_count: number;

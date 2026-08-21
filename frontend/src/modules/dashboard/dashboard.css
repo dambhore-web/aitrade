@@ -1,0 +1,92 @@
+.dashboard-page h1 {
+  margin-bottom: 1.1rem;
+}
+
+/* .risk-strip/.risk-metric moved to shared/components.css (2026-08-17) --
+   it's rendered from the app shell now, above every page, not just here. */
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.dashboard-card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s ease;
+}
+.dashboard-card:hover {
+  border-color: var(--accent);
+}
+.dashboard-card .card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+.dashboard-card .card-title {
+  font-weight: 650;
+  font-size: 1.02rem;
+  color: var(--ink);
+}
+.dashboard-card .card-desc {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  margin-top: 0.2rem;
+  max-width: 34ch;
+}
+.dashboard-card .card-metrics {
+  display: flex;
+  gap: 1.4rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+.dashboard-card .card-metrics b {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+.dashboard-card .card-error {
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+
+.tools-row-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin: 0 0 0.7rem;
+}
+.dashboard-tools {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.tool-chip {
+  background: var(--border-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.tool-chip:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}

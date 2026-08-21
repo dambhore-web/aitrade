@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Optional
 
-from . import db, market_data, pipeline, session
+from . import db, exit_management, market_data, pipeline, session
 from .broadcaster import broadcaster
 
 logger = logging.getLogger("announcement_trading.auto_loop")
@@ -99,13 +99,25 @@ def _run(conn) -> None:
                         seen_keys.add(key)
 
                         try:
-                            result = pipeline.process_item(row.to_dict(), settings, kite_instances)
+                            result = pipeline.process_item(row.to_dict(), settings, kite_instances, conn)
                         except Exception:
                             logger.exception("process_item failed for %s", symbol)
                             continue
 
                         trade_entry_id = None
                         if result.order_placed:
+                            # stop_loss_pct/target_pct back-derived from the actual
+                            # trigger/target prices execution.py placed the GTT at --
+                            # exit_management.py needs the pct (for its trailing-stop
+                            # calc) and the absolute prices (to re-place a triggered
+                            # GTT) both, so store all four instead of just the two
+                            # pre-existing pct columns.
+                            stop_loss_pct = target_pct = None
+                            if result.current_price:
+                                if result.trigger_price is not None:
+                                    stop_loss_pct = abs(result.current_price - result.trigger_price) / result.current_price * 100
+                                if result.target_price is not None:
+                                    target_pct = abs(result.target_price - result.current_price) / result.current_price * 100
                             entry = db.create_trade_entry(
                                 conn,
                                 {
@@ -116,6 +128,10 @@ def _run(conn) -> None:
                                     "transaction_type": "BUY",
                                     "amount": settings.get("amount"),
                                     "quantity": result.quantity,
+                                    "stop_loss_pct": stop_loss_pct,
+                                    "target_pct": target_pct,
+                                    "stop_loss_price": result.trigger_price,
+                                    "target_price": result.target_price,
                                     "notes": "auto-trading loop",
                                 },
                             )
@@ -137,11 +153,39 @@ def _run(conn) -> None:
                                 "quantity": result.quantity,
                                 "current_price": result.current_price,
                                 "trade_entry_id": trade_entry_id,
+                                "source": row.get("source"),
+                                # result.published_at (what process_item()
+                                # actually parsed and used for the
+                                # freshness decision) if it got that far,
+                                # falling back to the raw feed value
+                                # otherwise -- guarantees what's logged is
+                                # exactly what was evaluated, not a
+                                # separately re-read value that could in
+                                # principle differ (2026-08-17).
+                                "an_dt": result.published_at or row.get("an_dt"),
+                                "attachment_url": row.get("attchmntFile"),
                             },
                         )
                         broadcaster.publish(log_row)
                         with _state_lock:
                             _state["processed_count"] += 1
+
+                # Position management (trailing stop / forced exits / EOD
+                # square-off) -- ported 2026-08-17, see exit_management.py's
+                # module docstring. Runs every cycle same as the original
+                # (Kite_API_31.py's process_user_data() submits remove_orders()
+                # every job() tick too); cheap when nothing is open since it's
+                # gated per-account on kite.positions() actually returning
+                # something with quantity>0.
+                try:
+                    kite_instances = session.get_kite_instances()
+                except FileNotFoundError:
+                    kite_instances = []
+                if kite_instances:
+                    try:
+                        exit_management.run_cycle(conn, kite_instances)
+                    except Exception:
+                        logger.exception("Error in exit_management.run_cycle")
 
                 _set_state(last_error=None)
 

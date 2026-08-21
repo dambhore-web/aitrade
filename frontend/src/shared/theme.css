@@ -1,0 +1,134 @@
+/* Shared design tokens -- introduced in the Phase 1 nav/dashboard redesign
+   (see docs/requirements.md). Scoped as CSS custom properties on :root so
+   they're available anywhere without every module needing to import this
+   file; existing per-module stylesheets (trading.css, equity.css, etc.)
+   are untouched in this phase and keep their own literal colors -- Phase 3
+   migrates them onto these tokens.
+
+   live/paper/stopped/danger are semantic (state), never decorative --
+   `--accent` is the only "brand" color, kept separate so a settings button
+   never reads as a "trading is live" signal. */
+:root {
+  --ink: #14181f;
+  --ink-soft: #565d6b;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border: #e1e4ea;
+  --border-soft: #edeff3;
+
+  --accent: #21607d;
+  --accent-soft: #e7eff2;
+  --accent-ink: #14415a;
+
+  --live: #1e8e5a;
+  --live-soft: #e6f4ec;
+  --paper: #a5720a;
+  --paper-soft: #fbf1de;
+  --stopped: #6b7280;
+  --stopped-soft: #eceef1;
+  --danger: #c4122f;
+  --danger-soft: #fbe9ec;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(20, 24, 31, 0.04), 0 4px 16px rgba(20, 24, 31, 0.05);
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #eef0f4;
+    --ink-soft: #aab0bd;
+    --bg: #0f1216;
+    --surface: #171b21;
+    --border: #2a2f38;
+    --border-soft: #21252c;
+
+    --accent: #6fa8c4;
+    --accent-soft: #17242b;
+    --accent-ink: #a9d3e6;
+
+    --live: #4ad393;
+    --live-soft: #12271e;
+    --paper: #e0a83f;
+    --paper-soft: #2a2214;
+    --stopped: #9096a1;
+    --stopped-soft: #1c1f24;
+    --danger: #f0576f;
+    --danger-soft: #2a151a;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #eef0f4;
+  --ink-soft: #aab0bd;
+  --bg: #0f1216;
+  --surface: #171b21;
+  --border: #2a2f38;
+  --border-soft: #21252c;
+
+  --accent: #6fa8c4;
+  --accent-soft: #17242b;
+  --accent-ink: #a9d3e6;
+
+  --live: #4ad393;
+  --live-soft: #12271e;
+  --paper: #e0a83f;
+  --paper-soft: #2a2214;
+  --stopped: #9096a1;
+  --stopped-soft: #1c1f24;
+  --danger: #f0576f;
+  --danger-soft: #2a151a;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- shared status badge, used by the sidebar and dashboard ---- */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  line-height: 1;
+}
+.status-badge .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-badge.live {
+  background: var(--live-soft);
+  color: var(--live);
+}
+.status-badge.live .dot {
+  background: var(--live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 20%, transparent);
+}
+.status-badge.paper {
+  background: var(--paper-soft);
+  color: var(--paper);
+}
+.status-badge.paper .dot {
+  background: var(--paper);
+}
+.status-badge.stopped {
+  background: var(--stopped-soft);
+  color: var(--stopped);
+}
+.status-badge.stopped .dot {
+  background: var(--stopped);
+}
+.status-badge.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.status-badge.error .dot {
+  background: var(--danger);
+}

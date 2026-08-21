@@ -12,6 +12,11 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { apiGet } from "../../shared/api";
+import Section from "../../shared/Section";
+import EquityAutoLoopControl from "./EquityAutoLoopControl";
+import EquityPositionsPanel from "./EquityPositionsPanel";
+import EquitySettingsPanel from "./EquitySettingsPanel";
+import WatchlistEditor from "./WatchlistEditor";
 import type {
   CandlesResponse,
   EquityStatus,
@@ -126,66 +131,120 @@ export default function EquityTradingPage() {
   }, [candles.data, signals.data]);
 
   const collectorLive = !!status.data?.latest_price_utc;
+  const [tab, setTab] = useState<"live" | "explorer" | "watchlist">("live");
 
   return (
     <div className="page">
-      <h1>Equity Trading — Indicator Signals</h1>
-      <p className="status-line">
-        {status.data ? (
-          <>
-            {status.data.watchlist_count} symbols watched — last candle{" "}
-            {status.data.latest_candle_utc ? new Date(status.data.latest_candle_utc).toLocaleString() : "n/a"}
-            {" — "}
-            {collectorLive ? "live collector running" : "collector not currently streaming (historical data only)"}
-          </>
-        ) : (
-          "Loading status..."
-        )}
-      </p>
+      <h1>Equity Trading</h1>
 
-      <div className="equity-layout">
-        <label className="symbol-select-label">
-          Symbol
-          <select value={symbol ?? ""} onChange={(e) => setSymbol(e.target.value)}>
-            {(watchlist.data?.symbols ?? []).map((s) => (
-              <option key={s} value={s}>
-                {s}
-                {latestPrices.data?.prices[s] ? ` — ${latestPrices.data.prices[s].ltp.toFixed(2)}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* Two different jobs that used to share one continuous scroll --
+          split in the Phase 2 nav/UI redesign (see docs/requirements.md):
+          watching/controlling the live auto-loop vs. researching any
+          watched symbol's chart. Both sections stay mounted (just
+          hidden/shown via CSS) rather than conditionally rendered, so the
+          chart's one-time setup effect below never has to re-run. */}
+      <div className="tab-bar">
+        <button className={tab === "live" ? "tab-button active" : "tab-button"} onClick={() => setTab("live")}>
+          Live Auto-Trading
+        </button>
+        <button
+          className={tab === "explorer" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("explorer")}
+        >
+          Symbol Explorer
+        </button>
+        <button
+          className={tab === "watchlist" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("watchlist")}
+        >
+          Watchlist
+        </button>
+      </div>
 
-        <div className="chart-container" ref={containerRef} />
+      <div style={{ display: tab === "live" ? "block" : "none" }}>
+        <Section title="Status & Control">
+          <EquityAutoLoopControl />
+        </Section>
+        <Section title="Trade Settings">
+          <EquitySettingsPanel />
+        </Section>
+        <Section title="Positions & P&L">
+          <EquityPositionsPanel />
+        </Section>
+      </div>
 
-        <h2>Recent signals — {symbol}</h2>
-        <div className="table-scroll">
-          <table className="signals-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Signal</th>
-                <th>Price</th>
-                <th>Meta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(signals.data?.signals ?? []).map((s) => (
-                <tr key={s.id}>
-                  <td>{s.dt_ist}</td>
-                  <td className={`sig-${s.signal.toLowerCase()}`}>{s.signal}</td>
-                  <td>{s.close}</td>
-                  <td>{s.meta}</td>
-                </tr>
-              ))}
-              {signals.data?.signals.length === 0 && (
-                <tr>
-                  <td colSpan={4}>No signals yet for this symbol.</td>
-                </tr>
+      <div style={{ display: tab === "watchlist" ? "block" : "none" }}>
+        <Section title="Watchlist">
+          <WatchlistEditor />
+        </Section>
+      </div>
+
+      <div style={{ display: tab === "explorer" ? "block" : "none" }}>
+        <Section
+          title="Symbol Explorer"
+          headerRight={
+            <span className="status-line" style={{ margin: 0 }}>
+              {status.data ? (
+                <>
+                  {status.data.watchlist_count} symbols watched — last candle{" "}
+                  {status.data.latest_candle_utc
+                    ? new Date(status.data.latest_candle_utc).toLocaleString()
+                    : "n/a"}
+                  {" — "}
+                  {collectorLive ? "live collector running" : "collector not streaming (historical only)"}
+                </>
+              ) : (
+                "Loading status..."
               )}
-            </tbody>
-          </table>
-        </div>
+            </span>
+          }
+        >
+          <div className="equity-layout">
+            <label className="symbol-select-label">
+              Symbol
+              <select value={symbol ?? ""} onChange={(e) => setSymbol(e.target.value)}>
+                {(watchlist.data?.symbols ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                    {latestPrices.data?.prices[s] ? ` — ${latestPrices.data.prices[s].ltp.toFixed(2)}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="chart-container" ref={containerRef} />
+          </div>
+        </Section>
+
+        <Section title={`Recent signals — ${symbol ?? ""}`}>
+          <div className="table-scroll">
+            <table className="signals-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Signal</th>
+                  <th>Price</th>
+                  <th>Meta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(signals.data?.signals ?? []).map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.dt_ist}</td>
+                    <td className={`sig-${s.signal.toLowerCase()}`}>{s.signal}</td>
+                    <td>{s.close}</td>
+                    <td>{s.meta}</td>
+                  </tr>
+                ))}
+                {signals.data?.signals.length === 0 && (
+                  <tr>
+                    <td colSpan={4}>No signals yet for this symbol.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
       </div>
     </div>
   );
